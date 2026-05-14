@@ -553,13 +553,13 @@ def generate_pdf_report(fig, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_de
     return bytes(pdf.output(dest='S'))
     
 # --- MAIN APP ---
-st.set_page_config(page_title="4Factors Precision Scout", layout="wide")
+st.set_page_config(page_title="4Factors Net Points", layout="wide")
 if not os.path.exists("game_index.json"): build_game_index()
 @st.cache_data
 def load_index(): return pd.read_json("game_index.json") if os.path.exists("game_index.json") else pd.DataFrame()
 df_index = load_index()
 
-st.sidebar.title("🏀 Scouting Intelligence")
+st.sidebar.title("🏀 Scouting 4F Net Points")
 if st.sidebar.button("🔄 Refresh Data Index"): build_game_index(); st.rerun()
 
 mode = st.sidebar.radio("View Mode", ["Season Aggregate", "Game Boxscore", "Team Performance", "League Standings"], key="mode_radio")
