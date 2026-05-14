@@ -298,32 +298,33 @@ from fpdf.enums import XPos, YPos
 from fpdf.enums import XPos, YPos
 
 from fpdf.enums import XPos, YPos
-def generate_performance_pdf(df, fig, team, league, season, view_type):
+def generate_performance_pdf(df, team, league, season, view_type):
     pdf = FPDF()
     pdf.add_page()
-    
-    # Page 1: Title and Table
     pdf.set_font("Helvetica", 'B', 16)
     pdf.cell(0, 10, f"{team} - {view_type} Log", ln=True, align='C')
     pdf.set_font("Helvetica", '', 12)
     pdf.cell(0, 10, f"{league} {season}", ln=True, align='C')
-    pdf.ln(5)
+    pdf.ln(10)
 
-    # Table Headers
     pdf.set_font("Helvetica", 'B', 9)
-    cols = ["Round", "Opponent", "Shoot", "TOv", "Reb", "FT", "Total"]
+    # Updated Header name to Matchup
+    cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
     widths = [20, 60, 22, 22, 22, 22, 22]
-    
     for i, col in enumerate(cols):
         pdf.cell(widths[i], 8, col, border=1, align='C')
     pdf.ln()
 
-    # Table Rows
     pdf.set_font("Helvetica", '', 8)
     for _, row in df.iterrows():
-        opp = str(row['Opponent']).replace("🟢 ", "W ").replace("🔴 ", "L ")
+        # CLEAN ALL ICONS for PDF compatibility
+        # Matchup contains 🟢/🔴 and 🏠/✈️
+        match_text = str(row['Matchup'])
+        match_text = match_text.replace("🟢", "W").replace("🔴", "L")
+        match_text = match_text.replace("🏠", "(H)").replace("✈️", "(A)")
+        
         pdf.cell(widths[0], 7, str(row['Round']), border=1, align='C')
-        pdf.cell(widths[1], 7, opp, border=1)
+        pdf.cell(widths[1], 7, match_text, border=1)
         pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
         pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
         pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
@@ -331,18 +332,6 @@ def generate_performance_pdf(df, fig, team, league, season, view_type):
         pdf.cell(widths[6], 7, f"{row['Total 4F']:+.2f}", border=1, align='C')
         pdf.ln()
         if pdf.get_y() > 260: pdf.add_page()
-
-    # Page 2: Chart (Updated for clarity)
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.cell(0, 10, "Performance Trend Chart", ln=True, align='C')
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        # We increase the scale and fix the width to 1200 for the image export
-        fig.write_image(tmpfile.name, format="png", width=1200, height=500, scale=3)
-        # Position the image slightly lower to avoid title overlap
-        pdf.image(tmpfile.name, x=5, y=35, w=200)
-
     return bytes(pdf.output(dest='S'))
 
 def generate_standings_pdf(df, fig, league, season, phase):
@@ -420,35 +409,69 @@ def generate_standings_pdf(df, league, season, phase):
         pdf.cell(widths[6], 7, f"{row['Net Points']:+.2f}", border=1, align='C')
         pdf.ln()
     return bytes(pdf.output(dest='S'))
-
 def generate_performance_pdf(df, team, league, season, view_type):
     pdf = FPDF()
     pdf.add_page()
+    
+    # Header
     pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"{team} - {view_type} Log", ln=True, align='C')
+    pdf.cell(0, 10, f"Scouting Report: {team}", ln=True, align='C')
     pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 10, f"{league} {season}", ln=True, align='C')
-    pdf.ln(10)
+    pdf.cell(0, 8, f"{league} {season} | {view_type}", ln=True, align='C')
+    pdf.ln(5)
 
-    pdf.set_font("Helvetica", 'B', 9)
-    cols = ["Round", "Opponent", "Shoot", "TOv", "Reb", "FT", "Total"]
+    # --- NEW: BATCH SCOUTING SUMMARY SECTION ---
+    pdf.set_fill_color(245, 245, 245)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 10, "  Batch Scouting Summary (Averages)", border=1, ln=True, fill=True)
+    
+    pdf.set_font("Helvetica", '', 9)
+    # Define factors to summarize
+    factors = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
+    
+    # Draw a summary box for each factor
+    for f in factors:
+        net_val = df[f"{f}_Net"].mean()
+        off_val = df[f"{f}_Off"].mean()
+        def_val = df[f"{f}_Def"].mean()
+        
+        # Line text
+        summary_line = f" {f}: Net {net_val:+.2f} | Offense: {off_val:+.2f} | Defense: {def_val:+.2f}"
+        pdf.cell(0, 7, summary_line, border='LR', ln=True)
+    
+    # Bottom border of the summary box
+    pdf.cell(0, 0, "", border='T', ln=True)
+    pdf.ln(8)
+
+    # --- GAME LOG TABLE ---
+    pdf.set_font("Helvetica", 'B', 10)
+    pdf.set_fill_color(230, 230, 230)
+    cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
     widths = [20, 60, 22, 22, 22, 22, 22]
+    
     for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C')
+        pdf.cell(widths[i], 8, col, border=1, align='C', fill=True)
     pdf.ln()
 
     pdf.set_font("Helvetica", '', 8)
-    for _, row in df.iterrows():
-        opp = str(row['Opponent']).replace("🟢 ", "W ").replace("🔴 ", "L ")
-        pdf.cell(widths[0], 7, str(row['Round']), border=1, align='C')
-        pdf.cell(widths[1], 7, opp, border=1)
-        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
-        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
-        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
-        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
-        pdf.cell(widths[6], 7, f"{row['Total 4F']:+.2f}", border=1, align='C')
+    for _, row_data in df.iterrows():
+        # Clean icons for PDF safety
+        match_text = str(row_data['Matchup'])
+        match_text = match_text.replace("🟢", "W").replace("🔴", "L").replace("🏠", "(H)").replace("✈️", "(A)").replace("✈", "(A)")
+        match_text = match_text.encode('ascii', 'ignore').decode('ascii')
+        
+        pdf.cell(widths[0], 7, str(row_data['Round']), border=1, align='C')
+        pdf.cell(widths[1], 7, match_text, border=1)
+        pdf.cell(widths[2], 7, f"{row_data['Shooting']:+.2f}", border=1, align='C')
+        pdf.cell(widths[3], 7, f"{row_data['Turnovers']:+.2f}", border=1, align='C')
+        pdf.cell(widths[4], 7, f"{row_data['Rebounding']:+.2f}", border=1, align='C')
+        pdf.cell(widths[5], 7, f"{row_data['Free Throws']:+.2f}", border=1, align='C')
+        pdf.cell(widths[6], 7, f"{row_data['Total 4F']:+.2f}", border=1, align='C')
         pdf.ln()
-        if pdf.get_y() > 260: pdf.add_page()
+        
+        if pdf.get_y() > 270:
+            pdf.add_page()
+            
     return bytes(pdf.output(dest='S'))
 def generate_pdf_report(fig, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_def, i2_tot, i2_off, i2_def, text_t1, text_t2, summary_data=None):
     pdf = FPDF()
@@ -591,6 +614,19 @@ elif mode == "Team Performance":
     sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
     teams = get_teams_in_league(league, season)
     target_team = st.sidebar.selectbox("Select Team", teams, key="perf_team_sel")
+    
+    # --- RESET LOGIC ---
+    current_context = f"{league}_{season}_{sel_phase}_{target_team}"
+    if "last_context" not in st.session_state:
+        st.session_state["last_context"] = current_context
+
+    if st.session_state["last_context"] != current_context:
+        for key in ["perf_res_choice", "perf_venue_choice", "perf_specific_rnds", "perf_range_rnds"]:
+            if key in st.session_state: del st.session_state[key]
+        st.session_state["last_context"] = current_context
+        st.rerun()
+    # -------------------
+
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
     df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
@@ -600,8 +636,38 @@ elif mode == "Team Performance":
         st.warning(f"No games found for {target_team}.")
         st.stop()
 
+    df_team['is_win'] = df_team.apply(lambda x: (x['pts1'] > x['pts2'] if x['t1'] == target_team else x['pts2'] > x['pts1']), axis=1)
+    df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("📅 Filter Game Stretch")
+    all_rnds = sorted(df_team['round'].unique())
+
+    specific_rnds = st.sidebar.multiselect("🎯 Pick Specific Rounds", all_rnds, key="perf_specific_rnds")
+    res_choice = st.sidebar.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
+    venue_choice = st.sidebar.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
+    
+    if len(all_rnds) > 1:
+        range_rnds = st.sidebar.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
+    else:
+        range_rnds = (all_rnds[0], all_rnds[0])
+
+    if specific_rnds:
+        df_filtered = df_team[df_team['round'].isin(specific_rnds)]
+        filter_msg = f"Specific Rounds: {', '.join(specific_rnds)}"
+    else:
+        allowed_wins = [True if r == "Win" else False for r in res_choice]
+        start_idx = all_rnds.index(range_rnds[0]); end_idx = all_rnds.index(range_rnds[1])
+        allowed_range = all_rnds[start_idx : end_idx+1]
+        df_filtered = df_team[(df_team['is_win'].isin(allowed_wins)) & (df_team['venue'].isin(venue_choice)) & (df_team['round'].isin(allowed_range))]
+        filter_msg = f"Filters: {'/'.join(res_choice)} | {'/'.join(venue_choice)} | {range_rnds[0]}-{range_rnds[1]}"
+
+    if df_filtered.empty:
+        st.error("⚠️ No games match this filter combination.")
+        st.stop()
+
     performance_data = []
-    for _, row in df_team.sort_values('round').iterrows():
+    for _, row in df_filtered.sort_values('round').iterrows():
         g = get_raw_game_data_custom(row['path'])
         if not g: continue
         is_t1 = g['t1_name'] == target_team
@@ -611,25 +677,69 @@ elif mode == "Team Performance":
         f_def = calc_raw_factors(stats_opp, stats_self['drb'], lg_effic, lg_orb_pct)
         f_def_inv = {k: -v for k, v in f_def.items()} 
         
-        display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
-        opp_name = row['t2'] if is_t1 else row['t1']
-        result_color = "🟢" if (row['pts1'] > row['pts2'] if is_t1 else row['pts2'] > row['pts1']) else "🔴"
+        if view_type == "Offensive Impact": display_vals = f_off
+        elif view_type == "Defensive Impact": display_vals = f_def_inv
+        else: display_vals = {k: f_off[k] + f_def_inv[k] for k in f_off}
         
-        performance_data.append({
-            "Round": row['round'], "Opponent": f"{result_color} vs {opp_name}",
+        # Store individual components for averaging
+        entry = {
+            "Round": row['round'], 
+            "Matchup": f"{'🟢' if row['is_win'] else '🔴'} {'🏠' if row['venue']=='Home' else '✈️'} vs {row['t2'] if is_t1 else row['t1']}",
             "Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'],
             "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'],
             "Total 4F": sum(display_vals.values())
-        })
+        }
+        # Add O/D components for every factor
+        for f in ["Shooting", "Turnovers", "Rebounding", "Free Throws"]:
+            entry[f"{f}_Off"] = f_off[f]
+            entry[f"{f}_Def"] = f_def_inv[f]
+            entry[f"{f}_Net"] = f_off[f] + f_def_inv[f]
+
+        performance_data.append(entry)
 
     perf_df = pd.DataFrame(performance_data)
-    st.subheader(f"📈 {target_team} - {sel_phase} ({view_type})")
-    st.dataframe(perf_df.style.format({k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]})
+    
+    # --- DETAILED SCOUTING SUMMARY ---
+    st.subheader(f"📊 {target_team} - Batch Scouting Summary")
+    st.info(f"Analyzed {len(perf_df)} games. {filter_msg}")
+    
+    # 4-Column Layout for the 4 Factors
+    col_s, col_r, col_t, col_f = st.columns(4)
+    
+    factors_map = {
+        "Shooting": col_s, "Rebounding": col_r, 
+        "Turnovers": col_t, "Free Throws": col_f
+    }
+
+    for f_name, col in factors_map.items():
+        net_avg = perf_df[f"{f_name}_Net"].mean()
+        off_avg = perf_df[f"{f_name}_Off"].mean()
+        def_avg = perf_df[f"{f_name}_Def"].mean()
+        
+        with col:
+            st.markdown(f"#### {f_name}")
+            st.markdown(f"**Net: {net_avg:+.2f}**")
+            st.caption(f"Off: {off_avg:+.2f} | Def: {def_avg:+.2f}")
+
+    st.markdown("---")
+    
+    # Row for Overall Batch Efficiency
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Batch Games", len(perf_df))
+    # Summing the averages of all Net factors
+    total_net = sum([perf_df[f"{fn}_Net"].mean() for fn in factors_map.keys()])
+    c2.metric("Avg Net Efficiency", f"{total_net:+.2f}")
+    c3.metric("View Applied", view_type)
+
+    st.markdown("---")
+    
+    # Display table (keep it clean, only show the columns relevant to the view_type)
+    cols_to_show = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
+    st.dataframe(perf_df[cols_to_show].style.format({k: "{:+.2f}" for k in cols_to_show if k not in ["Round", "Matchup"]})
                  .background_gradient(cmap='RdYlGn', subset=["Total 4F"]), use_container_width=True, hide_index=True)
 
     pdf_perf = generate_performance_pdf(perf_df, target_team, league, season, view_type)
-    st.download_button("📥 Download Performance PDF", pdf_perf, f"Perf_{target_team}.pdf")
-    
+    st.download_button("📥 Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
     st.stop()
 elif mode == "League Standings":
     phases_available = sorted(df_league['phase'].unique())
