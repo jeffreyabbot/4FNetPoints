@@ -7,6 +7,8 @@ from fpdf import FPDF
 import json
 import re
 from fpdf.enums import XPos, YPos
+import matplotlib.pyplot as plt
+import io
 
 # --- CONFIGURATION ---
 DATA_BASE_PATH = "informes_data"
@@ -24,6 +26,40 @@ def clean_num(val):
     except: return 0.0
 
 # --- HELPERS ---
+def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
+    labels = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
+    vals_l = [data_l[k] for k in labels]
+    vals_r = [data_r[k] for k in labels]
+    
+    # Create plot
+    fig, ax = plt.subplots(figsize=(10, 5))
+    y = range(len(labels))
+    width = 0.35
+    
+    # Plot bars (Horizontal like your Plotly chart)
+    # Color 1: Blue (#2980B9), Color 2: Gold (#7E6605)
+    bar1 = ax.barh([i + width/2 for i in y], vals_l, width, label=team_l, color='#2980B9')
+    bar2 = ax.barh([i - width/2 for i in y], vals_r, width, label=team_r, color='#7E6605')
+    
+    # Add labels on bars
+    ax.bar_label(bar1, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
+    ax.bar_label(bar2, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
+    
+    # Formatting
+    ax.set_yticks(y)
+    ax.set_yticklabels(labels)
+    ax.invert_yaxis() # Labels top-to-bottom
+    ax.axvline(0, color='black', linewidth=1) # Zero line
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1), ncol=2, frameon=False)
+    
+    # Save to buffer
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 def get_per_game_volumes_by_phase(team_name, league, season, phase, row_label="TOTAL"):
     # Convert UI phase name (e.g. "Regular Season - ESTE") back to folder name ("Regular_Season")
     # We take the part before the " - " and replace spaces with underscores
@@ -473,26 +509,19 @@ def generate_performance_pdf(df, team, league, season, view_type):
             pdf.add_page()
             
     return bytes(pdf.output(dest='S'))
-def generate_pdf_report(fig, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_def, i2_tot, i2_off, i2_def, text_t1, text_t2, summary_data=None):
+def generate_pdf_report(chart_buf, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_def, i2_tot, i2_off, i2_def, text_t1, text_t2, summary_data=None):
     pdf = FPDF()
     pdf.add_page()
     
-    # --- DYNAMIC TITLE WRAPPING ---
-    title_text = f"4-Factors Matchup: {t1} vs {t2}"
+    # Title
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, f"4-Factors Matchup: {t1} vs {t2}", ln=True, align='C')
+    pdf.ln(5)
     
-    # If the title is very long (> 50 characters), shrink the font so it fits
-    font_size = 16 if len(title_text) < 50 else 12
-    
-    pdf.set_font("Helvetica", 'B', font_size)
-    # multi_cell(0, ...) wraps the text if it hits the margin
-    pdf.multi_cell(0, 10, title_text, align='C')
-    
-    # -------------------------------
-    
+    # --- INSERT THE CHART IMAGE ---
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        fig.write_image(tmpfile.name, format="png", width=1000, height=450, scale=2)
-        pdf.image(tmpfile.name, x=10, w=190)
-    
+        tmpfile.write(chart_buf.getbuffer())
+        pdf.image(tmpfile.name, x=15, w=180)
     pdf.ln(5)
     
     # 1. Scouting Interpretation Section
@@ -923,12 +952,13 @@ if st.button("Generate PDF Report", key="pdf_btn"):
                 'real_diff': game_record['pts1'] - game_record['pts2'],
                 '4f_diff': sum(i1_tot.values()) - sum(i2_tot.values())
             }
-
-        # 3. Generate PDF
-        fig_pdf = plot_4f_comparison(i1_tot, i2_tot, t1, t2, is_pdf=True)
+        # 2. CREATE THE MATPLOTLIB CHART (Instead of Plotly)
+        chart_buffer = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
+        # 3. GENERATE PDF (Passing the buffer and all data)
         pdf_bytes = generate_pdf_report(
-            fig_pdf, t1, t2, lg_effic, lg_orb_pct, 
-            i1_tot, i1_raw[0], i1_raw[1], i2_tot, i2_raw[0], i2_raw[1],
-            text_t1, text_t2, summary
-        )
-        st.download_button("Download PDF", data=pdf_bytes, file_name="report.pdf", mime="application/pdf")
+        chart_buffer, t1, t2, lg_effic, lg_orb_pct, 
+        i1_tot, i1_raw[0], i1_raw[1], i2_tot, i2_raw[0], i2_raw[1],
+        text_t1, text_t2, summary
+    )
+    
+        st.download_button("Download PDF", data=pdf_bytes, file_name=f"Report_{t1}_{t2}.pdf", mime="application/pdf")
