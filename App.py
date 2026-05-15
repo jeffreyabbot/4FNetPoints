@@ -579,26 +579,31 @@ def generate_pdf_report(chart_buf, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off,
     return bytes(pdf.output(dest='S'))
     
 # --- MAIN APP ----
-# --- CUSTOM THEMING (CONSISTENT RED THEME) ---
+# --- CUSTOM THEMING (THE ULTIMATE VERSION) ---
 st.markdown("""
     <style>
-        /* 1. Sidebar Base Background */
+        /* 1. Sidebar Base & Main Vertical Spacing */
         [data-testid="stSidebar"] {
             background-color: #1e2130 !important;
         }
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 1rem !important; 
+            padding-top: 1.5rem !important;
+        }
 
-        /* 2. Global Text Color */
+        /* 2. Global Text & Paragraph Reset */
         [data-testid="stSidebar"] * {
             color: #ffffff !important;
         }
+        [data-testid="stSidebar"] p {
+            margin-bottom: 0.2rem !important;
+        }
 
-        /* 3. Benchmark Chips (The small values) */
-        [data-testid="stSidebar"] code {
-            background-color: #2d324a !important;
-            color: #ffffff !important;
-            border: 1px solid #3f445e !important;
-            padding: 2px 6px !important;
-            border-radius: 4px !important;
+        /* 3. FIX LABEL SPACING (Main titles) */
+        [data-testid="stSidebar"] label {
+            margin-bottom: 4px !important;
+            font-weight: 600 !important;
+            display: flex;
         }
 
         /* 4. Info Box (Explanation) - Subtle Red Accent */
@@ -613,58 +618,69 @@ st.markdown("""
             font-size: 0.85rem !important;
         }
 
-        /* 5. THE SLIDER - Matching the Red Bar */
-        
-        /* Handles (Circles) */
-        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
-            background-color: #FF4B4B !important;
-            border: 2px solid #ffffff !important;
+        /* 5. FIX BENCHMARK SECTION (Tighten specifically) */
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+            gap: 0.5rem !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+            margin-top: -8px !important;
+            opacity: 0.8;
         }
 
-        /* Inactive Track */
-        [data-testid="stSidebar"] [data-baseweb="slider"] > div > div {
-            background-color: #3f445e !important;
-        }
-
-        /* Remove navy boxes behind 'Round' labels */
-        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] div,
-        [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
-        [data-testid="stSidebar"] [data-testid="stTickBarMax"],
-        [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
-            background-color: transparent !important;
-            background: transparent !important;
-        }
-
-        /* 6. Selectboxes & Multi-select Tags (Red) */
+        /* 6. SELECTBOXES & MULTISELECT */
+        [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
         [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
             background-color: #2d324a !important;
             border: 1px solid #3f445e !important;
+        }
+        [data-testid="stSidebar"] div[data-baseweb="select"] * {
+            color: #ffffff !important;
         }
         span[data-baseweb="tag"] {
             background-color: #FF4B4B !important;
             color: white !important;
         }
 
-        /* 7. Refresh Button (Red Border/Hover) */
+        /* 7. BENCHMARK CHIPS */
+        [data-testid="stSidebar"] code {
+            background-color: #2d324a !important;
+            color: #ffffff !important;
+            border: 1px solid #3f445e !important;
+            padding: 1px 4px !important;
+        }
+
+        /* 8. SLIDER FIXES (Red Bar) */
+        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
+            background-color: #FF4B4B !important;
+            border: 2px solid #ffffff !important;
+        }
+        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="presentation"] > div:first-child > div {
+            background: #FF4B4B !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
+        [data-testid="stSidebar"] [data-testid="stTickBarMax"],
+        [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
+            background-color: transparent !important;
+        }
+
+        /* 9. REFRESH BUTTON */
         [data-testid="stSidebar"] button {
             background-color: #2d324a !important;
             border: 1px solid #FF4B4B !important;
-            color: white !important;
         }
         [data-testid="stSidebar"] button:hover {
             background-color: #FF4B4B !important;
         }
 
-        /* 8. Radio Buttons - Red Selection */
-        [data-testid="stSidebar"] [data-testid="stRadioButton"] input:checked + div {
-            background-color: #FF4B4B !important;
-        }
-
-        /* 9. Logo Card */
+        /* 10. LOGO CARD & HORIZONTAL RULE */
         [data-testid="stSidebar"] [data-testid="stImage"] {
             background-color: #ffffff !important;
-            padding: 10px !important;
+            padding: 8px !important;
             border-radius: 8px !important;
+        }
+        [data-testid="stSidebar"] hr {
+            margin: 0.8rem 0 !important;
+            border-top: 1px solid #3f445e !important;
         }
     </style>
 """, unsafe_allow_html=True)
@@ -693,7 +709,6 @@ mode = st.sidebar.radio("View Mode", ["Season Aggregate", "Game Boxscore", "Team
 # 2. NEW: Select Season (Now global, so both modes use it)
 df_league = df_index[df_index['league'] == league]
 season = st.sidebar.selectbox("Season", sorted(df_league['season'].unique(), reverse=True), key="season_sel")
-
 
 # Calculation state
 i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "", "", ""
