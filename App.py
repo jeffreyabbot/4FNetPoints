@@ -353,11 +353,8 @@ def generate_performance_pdf(df, team, league, season, view_type):
 
     pdf.set_font("Helvetica", '', 8)
     for _, row in df.iterrows():
-        # CLEAN ALL ICONS for PDF compatibility
-        # Matchup contains 🟢/🔴 and 🏠/✈️
+        
         match_text = str(row['Matchup'])
-        match_text = match_text.replace("🟢", "W").replace("🔴", "L")
-        match_text = match_text.replace("🏠", "(H)").replace("✈️", "(A)")
         
         pdf.cell(widths[0], 7, str(row['Round']), border=1, align='C')
         pdf.cell(widths[1], 7, match_text, border=1)
@@ -581,31 +578,122 @@ def generate_pdf_report(chart_buf, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off,
 
     return bytes(pdf.output(dest='S'))
     
-# --- MAIN APP ---
+# --- MAIN APP ----
+# --- CUSTOM THEMING (CONSISTENT RED THEME) ---
+st.markdown("""
+    <style>
+        /* 1. Sidebar Base Background */
+        [data-testid="stSidebar"] {
+            background-color: #1e2130 !important;
+        }
+
+        /* 2. Global Text Color */
+        [data-testid="stSidebar"] * {
+            color: #ffffff !important;
+        }
+
+        /* 3. Benchmark Chips (The small values) */
+        [data-testid="stSidebar"] code {
+            background-color: #2d324a !important;
+            color: #ffffff !important;
+            border: 1px solid #3f445e !important;
+            padding: 2px 6px !important;
+            border-radius: 4px !important;
+        }
+
+        /* 4. Info Box (Explanation) - Subtle Red Accent */
+        [data-testid="stSidebar"] .stAlert {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid #3f445e !important;
+            border-left: 5px solid #FF4B4B !important;
+        }
+        [data-testid="stSidebar"] .stAlert p {
+            color: #cbd5e1 !important;
+            font-weight: normal !important;
+            font-size: 0.85rem !important;
+        }
+
+        /* 5. THE SLIDER - Matching the Red Bar */
+        
+        /* Handles (Circles) */
+        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
+            background-color: #FF4B4B !important;
+            border: 2px solid #ffffff !important;
+        }
+
+        /* Inactive Track */
+        [data-testid="stSidebar"] [data-baseweb="slider"] > div > div {
+            background-color: #3f445e !important;
+        }
+
+        /* Remove navy boxes behind 'Round' labels */
+        [data-testid="stSidebar"] [data-testid="stWidgetLabel"] div,
+        [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
+        [data-testid="stSidebar"] [data-testid="stTickBarMax"],
+        [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
+            background-color: transparent !important;
+            background: transparent !important;
+        }
+
+        /* 6. Selectboxes & Multi-select Tags (Red) */
+        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
+            background-color: #2d324a !important;
+            border: 1px solid #3f445e !important;
+        }
+        span[data-baseweb="tag"] {
+            background-color: #FF4B4B !important;
+            color: white !important;
+        }
+
+        /* 7. Refresh Button (Red Border/Hover) */
+        [data-testid="stSidebar"] button {
+            background-color: #2d324a !important;
+            border: 1px solid #FF4B4B !important;
+            color: white !important;
+        }
+        [data-testid="stSidebar"] button:hover {
+            background-color: #FF4B4B !important;
+        }
+
+        /* 8. Radio Buttons - Red Selection */
+        [data-testid="stSidebar"] [data-testid="stRadioButton"] input:checked + div {
+            background-color: #FF4B4B !important;
+        }
+
+        /* 9. Logo Card */
+        [data-testid="stSidebar"] [data-testid="stImage"] {
+            background-color: #ffffff !important;
+            padding: 10px !important;
+            border-radius: 8px !important;
+        }
+    </style>
+""", unsafe_allow_html=True)
 st.set_page_config(page_title="4Factors Net Points", layout="wide")
 if not os.path.exists("game_index.json"): build_game_index()
 @st.cache_data
 def load_index(): return pd.read_json("game_index.json") if os.path.exists("game_index.json") else pd.DataFrame()
 df_index = load_index()
 
-st.sidebar.title("🏀 Scouting 4F Net Points")
-if st.sidebar.button("🔄 Refresh Data Index"): build_game_index(); st.rerun()
-
-mode = st.sidebar.radio("View Mode", ["Season Aggregate", "Game Boxscore", "Team Performance", "League Standings"], key="mode_radio")
-
 # 1. Select League
 league = st.sidebar.selectbox("League", sorted(df_index['league'].unique()), key="league_select")
-
-# 2. NEW: Select Season (Now global, so both modes use it)
-df_league = df_index[df_index['league'] == league]
-season = st.sidebar.selectbox("Season", sorted(df_league['season'].unique(), reverse=True), key="season_sel")
 
 # --- IMPROVED LOGO SECTION ---
 config = LEAGUE_CONFIG.get(league, {})
 logo_filename = config.get("logo", f"{league.lower()}.png") 
 logo_full_path = os.path.join(LOGOS_PATH, logo_filename)
 if os.path.exists(logo_full_path):
-    st.sidebar.image(logo_full_path, use_container_width=True)
+    col1, col2, col3 = st.sidebar.columns([1, 3, 1])
+    with col2:
+        st.image(logo_full_path, width=150)
+st.sidebar.title("Scouting 4F Net Points")
+if st.sidebar.button("Refresh Data Index"): build_game_index(); st.rerun()
+
+mode = st.sidebar.radio("View Mode", ["Season Aggregate", "Game Boxscore", "Team Performance", "League Standings"], key="mode_radio")
+
+# 2. NEW: Select Season (Now global, so both modes use it)
+df_league = df_index[df_index['league'] == league]
+season = st.sidebar.selectbox("Season", sorted(df_league['season'].unique(), reverse=True), key="season_sel")
+
 
 # Calculation state
 i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "", "", ""
@@ -614,10 +702,26 @@ i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "
 lg_effic, lg_orb_pct, lg_data = get_league_benchmarks(league, season)
 # --- LEAGUE BENCHMARKS DISPLAY ---
 st.sidebar.markdown("---")
-st.sidebar.subheader("🌍 League Benchmarks")
+st.sidebar.markdown("**League Benchmarks**")
+
+# Using columns for a compact horizontal layout
 col_lg1, col_lg2 = st.sidebar.columns(2)
-col_lg1.metric("Lg Effic", f"{lg_effic:.2f}")
-col_lg2.metric("Lg OR%", f"{lg_orb_pct:.2%}")
+
+with col_lg1:
+    # We use a help tooltip for the detailed explanation to keep the UI clean
+    st.markdown(f"**Effic:** `{lg_effic:.2f}`")
+    st.caption("Pts per possession.")
+
+with col_lg2:
+    st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
+    st.caption("% of Off. Rebounds.")
+
+# Optional: Add a small hover-over info icon for the full definitions
+st.sidebar.info(
+    "**Lg. Effic:** The average points scored per possession across the league.\n\n"
+    "**Lg. OR%:** The percentage of available offensive rebounds grabbed by the attacking team.",
+    icon=None # Set to None to keep it professional and text-only
+)
 if mode == "Season Aggregate":
     # Filter teams based on the chosen season
     teams = get_teams_in_league(league, season)
@@ -637,7 +741,7 @@ if mode == "Season Aggregate":
     i1_tot = {k: (t1_off_raw[k]-lg_raw[k]) + (lg_raw[k]-t1_def_raw[k]) for k in lg_raw}
     i2_tot = {k: (t2_off_raw[k]-lg_raw[k]) + (lg_raw[k]-t2_def_raw[k]) for k in lg_raw}
     i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
-    header_title = f"📊 {season} 4-Factors Aggregate: {t1} vs {t2}"
+    header_title = f"{season} 4-Factors Aggregate: {t1} vs {t2}"
 elif mode == "Team Performance":
     phases_avail = sorted(df_league['phase'].unique())
     sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
@@ -669,10 +773,10 @@ elif mode == "Team Performance":
     df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
 
     st.sidebar.markdown("---")
-    st.sidebar.subheader("📅 Filter Game Stretch")
+    st.sidebar.subheader("Filter Game Stretch")
     all_rnds = sorted(df_team['round'].unique())
 
-    specific_rnds = st.sidebar.multiselect("🎯 Pick Specific Rounds", all_rnds, key="perf_specific_rnds")
+    specific_rnds = st.sidebar.multiselect("Pick Specific Rounds", all_rnds, key="perf_specific_rnds")
     res_choice = st.sidebar.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
     venue_choice = st.sidebar.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
     
@@ -692,7 +796,7 @@ elif mode == "Team Performance":
         filter_msg = f"Filters: {'/'.join(res_choice)} | {'/'.join(venue_choice)} | {range_rnds[0]}-{range_rnds[1]}"
 
     if df_filtered.empty:
-        st.error("⚠️ No games match this filter combination.")
+        st.error("No games match this filter combination.")
         st.stop()
 
     performance_data = []
@@ -711,9 +815,11 @@ elif mode == "Team Performance":
         else: display_vals = {k: f_off[k] + f_def_inv[k] for k in f_off}
         
         # Store individual components for averaging
+        result_label = "W" if row['is_win'] else "L"
+        venue_label = "(H)" if row['venue'] == 'Home' else "(A)"
         entry = {
             "Round": row['round'], 
-            "Matchup": f"{'🟢' if row['is_win'] else '🔴'} {'🏠' if row['venue']=='Home' else '✈️'} vs {row['t2'] if is_t1 else row['t1']}",
+            "Matchup": f"{result_label} {venue_label} vs {row['t2'] if is_t1 else row['t1']}",
             "Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'],
             "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'],
             "Total 4F": sum(display_vals.values())
@@ -729,7 +835,7 @@ elif mode == "Team Performance":
     perf_df = pd.DataFrame(performance_data)
     
     # --- DETAILED SCOUTING SUMMARY ---
-    st.subheader(f"📊 {target_team} - Batch Scouting Summary")
+    st.subheader(f"{target_team} - Batch Scouting Summary")
     st.info(f"Analyzed {len(perf_df)} games. {filter_msg}")
     
     # 4-Column Layout for the 4 Factors
@@ -768,13 +874,13 @@ elif mode == "Team Performance":
                  .background_gradient(cmap='RdYlGn', subset=["Total 4F"]), use_container_width=True, hide_index=True)
 
     pdf_perf = generate_performance_pdf(perf_df, target_team, league, season, view_type)
-    st.download_button("📥 Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
+    st.download_button("Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
     st.stop()
 elif mode == "League Standings":
     phases_available = sorted(df_league['phase'].unique())
     selected_phase = st.sidebar.selectbox("Filter by Phase", phases_available, key="standings_phase")
     
-    st.subheader(f"🏆 {league} {season} - {selected_phase} Standings")
+    st.subheader(f"{league} {season} - {selected_phase} Standings")
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
     teams = get_teams_in_league(league, season)
@@ -803,7 +909,7 @@ elif mode == "League Standings":
             })
             
     if not league_results:
-        st.error(f"❌ No aggregate data found for '{selected_phase}'.")
+        st.error(f"No aggregate data found for '{selected_phase}'.")
     else:
         standings_df = pd.DataFrame(league_results).sort_values("Net Points", ascending=False)
         standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
@@ -815,7 +921,7 @@ elif mode == "League Standings":
         )
 
         pdf_bytes = generate_standings_pdf(standings_df, league, season, selected_phase)
-        st.download_button("📥 Download Standings PDF", data=pdf_bytes, file_name=f"Standings_{league}_{selected_phase}.pdf")
+        st.download_button("Download Standings PDF", data=pdf_bytes, file_name=f"Standings_{league}_{selected_phase}.pdf")
 
     st.stop()
 else: # Game Boxscore mode
@@ -859,14 +965,14 @@ else: # Game Boxscore mode
     i2_tot = t2_raw
     i1_raw, i2_raw = (t1_raw, t1_raw), (t2_raw, t2_raw)
     
-    header_title = f"📊 4-Factors Impact: {game_record['round']} - {t1} ({game_record['pts1']}) vs {t2} ({game_record['pts2']})"
+    header_title = f"4-Factors Impact: {game_record['round']} - {t1} ({game_record['pts1']}) vs {t2} ({game_record['pts2']})"
 # --- DISPLAY ---
 st.subheader(header_title)
 with st.container(border=True):
     st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True)
 # --- GLOSSARY / INTERPRETATION ---
 st.markdown("---")
-st.subheader("📝 Scouting Interpretation")
+st.subheader("Scouting Interpretation")
 
 factors =["Shooting", "Rebounding", "Turnovers", "Free Throws"]
 
@@ -903,7 +1009,7 @@ with c2:
 # --- FINAL SUMMARY (Boxscore Only) ---
 if mode == "Game Boxscore":
     st.markdown("---")
-    st.subheader("🏁 Final Match Summary")
+    st.subheader("Final Match Summary")
     
     real_score_diff = game_record['pts1'] - game_record['pts2']
     total_4f_home = sum(i1_tot.values())
@@ -916,17 +1022,19 @@ if mode == "Game Boxscore":
     
     # Optional logic note
     if abs(real_score_diff - net_4f_diff) > 10:
-        st.info("💡 Note: The 4F Net Difference accounts for shooting, rebounding, and turnovers.")
+        st.info("Note: The 4F Net Difference accounts for shooting, rebounding, and turnovers.")
 
 # --- EXPANDERS & PDF ---
-with st.expander("📖 Offense vs Defense Net Breakdown"):
+with st.expander("Offense vs Defense Net Breakdown"):
     c1, c2 = st.columns(2)
     with c1:
-        st.write(f"### 🏠 {t1}")
-        for f in factors: st.markdown(f"**{f} Net: {i1_tot[f]:+.2f}** | Off: {i1_raw[0][f]:+.2f} | Def: {i1_raw[1][f]:+.2f}")
+        st.write(f"### {t1} (Home)")
+        for f in factors: 
+            st.markdown(f"**{f} Net: {i1_tot[f]:+.2f}** | Off: {i1_raw[0][f]:+.2f} | Def: {i1_raw[1][f]:+.2f}")
     with c2:
-        st.write(f"### ✈️ {t2}")
-        for f in factors: st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
+        st.write(f"### {t2} (Away)")
+        for f in factors: 
+            st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
 
 if st.button("Generate PDF Report", key="pdf_btn"):
         # 1. Prepare Interpretation Lists
