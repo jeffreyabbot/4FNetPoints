@@ -892,6 +892,69 @@ elif mode == "Team Performance":
     st.download_button("Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
     st.stop()
 elif mode == "League Standings":
+    # 1. Prepare Phase Options with an "Overall" choice
+    phases_in_index = sorted(df_league['phase'].unique())
+    phase_options = ["Overall Season"] + phases_in_index
+    selected_phase = st.sidebar.selectbox("Competition Phase / Group", phase_options, key="standings_phase")
+    
+    st.subheader(f"{league} {season} - {selected_phase} Standings")
+    view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
+    
+    # 2. FILTER TEAMS: Only get teams that actually played in the selected phase
+    if selected_phase == "Overall Season":
+        # Get all teams that played in any phase/group this season
+        teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
+    else:
+        # Get only teams that appear in the selected group (e.g., ESTE)
+        df_phase_teams = df_league[df_league['phase'] == selected_phase]
+        teams_to_analyze = sorted(list(set(df_phase_teams['t1'].unique()) | set(df_phase_teams['t2'].unique())))
+
+    league_results = []
+    with st.spinner(f"Calculating {len(teams_to_analyze)} teams..."):
+        for team in teams_to_analyze:
+            # 3. GET DATA: If "Overall", we search all folders. If specific, we target the group.
+            if selected_phase == "Overall Season":
+                t_off = get_per_game_volumes(team, league, season, "TOTAL")
+                t_def = get_per_game_volumes(team, league, season, "Rival")
+            else:
+                t_off = get_per_game_volumes_by_phase(team, league, season, selected_phase, "TOTAL")
+                t_def = get_per_game_volumes_by_phase(team, league, season, selected_phase, "Rival")
+            
+            if t_off['pts'] == 0: continue 
+
+            lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
+            t_off_raw = calc_raw_factors(t_off, lg_data['drb'], lg_effic, lg_orb_pct)
+            t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
+            
+            off_impact = {k: (t_off_raw[k] - lg_raw[k]) for k in lg_raw}
+            def_impact = {k: (lg_raw[k] - t_def_raw[k]) for k in lg_raw}
+            net_impact = {k: off_impact[k] + def_impact[k] for k in lg_raw}
+            
+            display = off_impact if view_type == "Offensive Impact" else (def_impact if view_type == "Defensive Impact" else net_impact)
+                
+            league_results.append({
+                "Team": team, "Shooting": display['Shooting'], "Turnovers": display['Turnovers'],
+                "Rebounding": display['Rebounding'], "Free Throws": display['Free Throws'],
+                "Net Points": sum(display.values())
+            })
+            
+    if not league_results:
+        st.error(f"No data found for '{selected_phase}'.")
+    else:
+        standings_df = pd.DataFrame(league_results).sort_values("Net Points", ascending=False)
+        standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
+
+        # Format and display the table
+        st.dataframe(
+            standings_df.style.format({k: "{:+.2f}" for k in standings_df.columns if k not in ["Team", "Rank"]})
+            .background_gradient(cmap='RdYlGn', subset=["Net Points"], vmin=-10, vmax=10),
+            use_container_width=True, height=600, hide_index=True
+        )
+
+        pdf_bytes = generate_standings_pdf(standings_df, league, season, selected_phase)
+        st.download_button("Download Standings PDF", data=pdf_bytes, file_name=f"Standings_{league}_{selected_phase}.pdf")
+
+    st.stop()
     phases_available = sorted(df_league['phase'].unique())
     selected_phase = st.sidebar.selectbox("Filter by Phase", phases_available, key="standings_phase")
     
