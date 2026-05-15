@@ -758,22 +758,37 @@ if mode == "Season Aggregate":
     i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
     header_title = f"{season} 4-Factors Aggregate: {t1} vs {t2}"
 elif mode == "Team Performance":
+    # 1. Get available phases from the index
     phases_avail = sorted(df_league['phase'].unique())
     sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
-    teams = get_teams_in_league(league, season)
-    target_team = st.sidebar.selectbox("Select Team", teams, key="perf_team_sel")
     
-    # --- RESET LOGIC ---
+    # --- NEW: DYNAMIC TEAM FILTERING BY PHASE ---
+    # We look at the index and only grab teams that have games in the selected phase
+    df_phase_indexed = df_league[df_league['phase'] == sel_phase]
+    teams_in_phase = sorted(list(set(df_phase_indexed['t1'].unique()) | set(df_phase_indexed['t2'].unique())))
+    
+    if not teams_in_phase:
+        st.sidebar.warning("No teams found in the index for this phase.")
+        st.stop()
+        
+    target_team = st.sidebar.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
+    # ---------------------------------------------
+    
+    # --- RESET LOGIC (Clears filters when context changes) ---
     current_context = f"{league}_{season}_{sel_phase}_{target_team}"
     if "last_context" not in st.session_state:
         st.session_state["last_context"] = current_context
 
     if st.session_state["last_context"] != current_context:
-        for key in ["perf_res_choice", "perf_venue_choice", "perf_specific_rnds", "perf_range_rnds"]:
-            if key in st.session_state: del st.session_state[key]
+        # Reset filter widgets to defaults
+        st.session_state["perf_res_choice"] = ["Win", "Loss"]
+        st.session_state["perf_venue_choice"] = ["Home", "Away"]
+        if "perf_range_rnds" in st.session_state: del st.session_state["perf_range_rnds"]
+        if "perf_specific_rnds" in st.session_state: st.session_state["perf_specific_rnds"] = []
+        
         st.session_state["last_context"] = current_context
         st.rerun()
-    # -------------------
+    # ---------------------------------------------------------
 
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
