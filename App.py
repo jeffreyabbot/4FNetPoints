@@ -29,18 +29,23 @@ def clean_num(val):
 
 # --- HELPERS ---
 def get_team_icon(team_name):
-    """Encodes the team logo as a Base64 string for dataframe rendering."""
-    clean_name = str(team_name).strip()
+    """Normalizes team names to UPPERCASE to find the correct logo file."""
+    if not team_name:
+        return None
+        
+    # 1. Force the name to UPPERCASE for the search
+    # This means "real madrid" (ACB) and "REAL MADRID" (EL) both become "REAL MADRID"
+    clean_name = str(team_name).strip().upper()
     
-    # Path for the OS to find the file
+    # 2. Path to the file (Ensure your files in this folder are ALL CAPS)
     os_path = os.path.join(LOGOS_PATH, "teams", f"{clean_name}.png")
     
-    # Check if team logo exists, if not, use fallback
+    # 3. Fallback logic: If the specific team logo is missing
     if not os.path.exists(os_path):
-        os_path = os.path.join(LOGOS_PATH, "FEB.png")
-    
-    # Convert image file to Base64 string
-    if os.path.exists(os_path):
+        os_path = os.path.join(LOGOS_PATH, "FEB.png") # Your default placeholder
+        
+    # 4. Convert to Base64 (to fix the 'broken image' browser error)
+    if os_path and os.path.exists(os_path):
         try:
             with open(os_path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
