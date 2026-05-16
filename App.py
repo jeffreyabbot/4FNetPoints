@@ -28,24 +28,35 @@ def clean_num(val):
     except: return 0.0
 
 # --- HELPERS ---
+@st.cache_resource # This makes the search instant after the first time
+def get_logo_filename_map():
+    """Creates a dictionary mapping UPPERCASE team names to actual filenames on disk."""
+    folder_path = os.path.join(LOGOS_PATH, "teams")
+    if not os.path.exists(folder_path):
+        return {}
+    
+    # Builds a map like: {"REAL MADRID": "real madrid.png", "BARÇA": "Barça.png"}
+    return {f.upper().replace(".PNG", ""): f for f in os.listdir(folder_path) if f.lower().endswith(".png")}
+
 def get_team_icon(team_name):
-    """Normalizes team names to UPPERCASE to find the correct logo file."""
+    """Finds the logo file regardless of casing and converts to Base64."""
     if not team_name:
         return None
         
-    # 1. Force the name to UPPERCASE for the search
-    # This means "real madrid" (ACB) and "REAL MADRID" (EL) both become "REAL MADRID"
-    clean_name = str(team_name).strip().upper()
+    search_name = str(team_name).strip().upper()
+    logo_map = get_logo_filename_map()
     
-    # 2. Path to the file (Ensure your files in this folder are ALL CAPS)
-    os_path = os.path.join(LOGOS_PATH, "teams", f"{clean_name}.png")
+    # 1. Look for the actual filename in our map
+    actual_filename = logo_map.get(search_name)
     
-    # 3. Fallback logic: If the specific team logo is missing
-    if not os.path.exists(os_path):
-        os_path = os.path.join(LOGOS_PATH, "FEB.png") # Your default placeholder
+    if actual_filename:
+        os_path = os.path.join(LOGOS_PATH, "teams", actual_filename)
+    else:
+        # Fallback if no match found
+        os_path = os.path.join(LOGOS_PATH, "FEB.png")
         
-    # 4. Convert to Base64 (to fix the 'broken image' browser error)
-    if os_path and os.path.exists(os_path):
+    # 2. Convert to Base64 for the browser
+    if os.path.exists(os_path):
         try:
             with open(os_path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
