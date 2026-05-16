@@ -169,6 +169,70 @@ def get_per_game_volumes_by_phase(team_name, league, season, phase, row_label="T
         except: 
             return empty_stats
     return empty_stats
+def get_per_game_volumes(team_name, league, season, row_label="TOTAL"):
+    # 1. Initialize accumulators
+    total_gp = 0
+    # Store totals for the whole season
+    stats_acc = {"pts": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, "drb": 0, "orb": 0, "tov": 0}
+    found_any = False
+
+    season_path = os.path.join(DATA_BASE_PATH, league, season)
+    target_filename = f"AGGREGATE_{team_name}.xlsx"
+    
+    # 2. Walk through the whole season folder
+    for root, dirs, files in os.walk(season_path):
+        # Only process files inside 'aggregate' folders to avoid raw game files
+        if "aggregate" in root.lower():
+            if target_filename in files:
+                try:
+                    df = pd.read_excel(os.path.join(root, target_filename), header=None)
+                    
+                    # USE YOUR EXACT ROW MATCHING LOGIC
+                    matching_rows = df[df[0] == row_label]
+                    if matching_rows.empty:
+                        continue
+                    
+                    row_t = matching_rows.iloc[0]
+                    gp = clean_num(row_t[1])
+                    
+                    if gp > 0:
+                        found_any = True
+                        total_gp += gp
+                        # SUM THE ABSOLUTE TOTALS (Points, Rebounds, etc.)
+                        stats_acc["pts"] += clean_num(row_t[2])
+                        stats_acc["f2m"] += clean_num(row_t[3])
+                        stats_acc["f2a"] += clean_num(row_t[4])
+                        stats_acc["f3m"] += clean_num(row_t[5])
+                        stats_acc["f3a"] += clean_num(row_t[6])
+                        stats_acc["ftm"] += clean_num(row_t[7])
+                        stats_acc["fta"] += clean_num(row_t[8])
+                        stats_acc["drb"] += clean_num(row_t[10])
+                        stats_acc["orb"] += clean_num(row_t[11])
+                        stats_acc["tov"] += clean_num(row_t[15])
+                except:
+                    # If one file is corrupt, skip it and continue to the next one
+                    continue
+
+    # 3. If we didn't find any file, return the safe "empty" dictionary
+    if not found_any or total_gp == 0:
+        return {"gp": 1, "pts": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, "drb": 0, "orb": 0, "tov": 0}
+
+    # 4. DIVIDE THE SEASON TOTAL BY TOTAL GAMES PLAYED
+    # This gives the true average for the whole year (e.g. Total Pts / 39 games)
+    return {
+        "gp": total_gp,
+        "pts": stats_acc["pts"] / total_gp,
+        "f2m": stats_acc["f2m"] / total_gp,
+        "f2a": stats_acc["f2a"] / total_gp,
+        "f3m": stats_acc["f3m"] / total_gp,
+        "f3a": stats_acc["f3a"] / total_gp,
+        "ftm": stats_acc["ftm"] / total_gp,
+        "fta": stats_acc["fta"] / total_gp,
+        "drb": stats_acc["drb"] / total_gp,
+        "orb": stats_acc["orb"] / total_gp,
+        "tov": stats_acc["tov"] / total_gp
+    }
+
 def get_teams_in_league(league, season): # Added season param
     teams = set()
     season_path = os.path.join(DATA_BASE_PATH, league, season) # Target specific season
@@ -357,20 +421,6 @@ def calc_raw_factors(data, opp_drb, lg_effic, lg_orb_pct):
     free_throws = data['ftm'] - (0.4 * data['fta'] * lg_effic) + (0.06 * (data['fta'] - data['ftm']) * lg_effic)
     return {"Shooting": shooting, "Turnovers": turnovers, "Rebounding": rebounding, "Free Throws": free_throws}
 
-def get_per_game_volumes(team_name, league, season, row_label="TOTAL"): # Added season param
-    target_filename = f"AGGREGATE_{team_name}.xlsx"
-    season_path = os.path.join(DATA_BASE_PATH, league, season)
-    
-    for root, dirs, files in os.walk(season_path):
-        if target_filename in files:
-            df = pd.read_excel(os.path.join(root, target_filename), header=None)
-            row_t = df[df[0] == row_label].iloc[0]
-            gp = clean_num(row_t[1])
-            return {"gp": gp if gp > 0 else 1, "pts": clean_num(row_t[2])/gp, "f2m": clean_num(row_t[3])/gp,
-                    "f2a": clean_num(row_t[4])/gp, "f3m": clean_num(row_t[5])/gp, "f3a": clean_num(row_t[6])/gp,
-                    "ftm": clean_num(row_t[7])/gp, "fta": clean_num(row_t[8])/gp, "drb": clean_num(row_t[10])/gp,
-                    "orb": clean_num(row_t[11])/gp, "tov": clean_num(row_t[15])/gp}
-    return {"gp": 1, "pts": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, "drb": 0, "orb": 0, "tov": 0}
 
 def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
     labels =["Shooting", "Rebounding", "Turnovers", "Free Throws"]
@@ -741,6 +791,7 @@ elif mode == "Team Performance":
         st.error("No games match this filter combination.")
         st.stop()
 
+    # [Start of the Data Collection Loop]
     performance_data = []
     for _, row in df_filtered.sort_values('round').iterrows():
         g = get_raw_game_data_custom(row['path'])
@@ -756,17 +807,19 @@ elif mode == "Team Performance":
         elif view_type == "Defensive Impact": display_vals = f_def_inv
         else: display_vals = {k: f_off[k] + f_def_inv[k] for k in f_off}
         
-        # Store individual components for averaging
-        result_label = "W" if row['is_win'] else "L"
-        venue_label = "(H)" if row['venue'] == 'Home' else "(A)"
+        # KEY FIX: Ensure "Outcome" is added to this dictionary
         entry = {
             "Round": row['round'], 
-            "Matchup": f"{result_label} {venue_label} vs {row['t2'] if is_t1 else row['t1']}",
-            "Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'],
-            "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'],
-            "Total 4F": sum(display_vals.values())
+            "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} vs {row['t2'] if is_t1 else row['t1']}",
+            "Shooting": display_vals['Shooting'], 
+            "Turnovers": display_vals['Turnovers'],
+            "Rebounding": display_vals['Rebounding'], 
+            "Free Throws": display_vals['Free Throws'],
+            "Total 4F": sum(display_vals.values()),
+            "Outcome": "W" if row['is_win'] else "L" # <--- THIS LINE WAS MISSING
         }
-        # Add O/D components for every factor
+        
+        # Add components for the top summary cards
         for f in ["Shooting", "Turnovers", "Rebounding", "Free Throws"]:
             entry[f"{f}_Off"] = f_off[f]
             entry[f"{f}_Def"] = f_def_inv[f]
@@ -776,47 +829,42 @@ elif mode == "Team Performance":
 
     perf_df = pd.DataFrame(performance_data)
     
-    # --- DETAILED SCOUTING SUMMARY ---
-    st.subheader(f"{target_team} - Batch Scouting Summary")
-    st.info(f"Analyzed {len(perf_df)} games. {filter_msg}")
+    # --- DISPLAY SECTION ---
+    st.subheader(f"{target_team} - {view_type} Summary")
     
-    # 4-Column Layout for the 4 Factors
+    # 1. Summary Metrics (Batch averages)
     col_s, col_r, col_t, col_f = st.columns(4)
-    
-    factors_map = {
-        "Shooting": col_s, "Rebounding": col_r, 
-        "Turnovers": col_t, "Free Throws": col_f
-    }
+    factors_list = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
+    cols_map = {"Shooting": col_s, "Rebounding": col_r, "Turnovers": col_t, "Free Throws": col_f}
 
-    for f_name, col in factors_map.items():
-        net_avg = perf_df[f"{f_name}_Net"].mean()
-        off_avg = perf_df[f"{f_name}_Off"].mean()
-        def_avg = perf_df[f"{f_name}_Def"].mean()
-        
-        with col:
+    for f_name in factors_list:
+        with cols_map[f_name]:
             st.markdown(f"#### {f_name}")
-            st.markdown(f"**Net: {net_avg:+.2f}**")
-            st.caption(f"Off: {off_avg:+.2f} | Def: {def_avg:+.2f}")
+            st.markdown(f"**Net: {perf_df[f_name+'_Net'].mean():+.2f}**")
+            st.caption(f"O: {perf_df[f_name+'_Off'].mean():+.2f} | D: {perf_df[f_name+'_Def'].mean():+.2f}")
 
     st.markdown("---")
-    
-    # Row for Overall Batch Efficiency
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Batch Games", len(perf_df))
-    # Summing the averages of all Net factors
-    total_net = sum([perf_df[f"{fn}_Net"].mean() for fn in factors_map.keys()])
-    c2.metric("Avg Net Efficiency", f"{total_net:+.2f}")
-    c3.metric("View Applied", view_type)
 
-    st.markdown("---")
-    
-    # Display table (keep it clean, only show the columns relevant to the view_type)
-    cols_to_show = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-    st.dataframe(perf_df[cols_to_show].style.format({k: "{:+.2f}" for k in cols_to_show if k not in ["Round", "Matchup"]})
-                 .background_gradient(cmap='RdYlGn', subset=["Total 4F"]), use_container_width=True, hide_index=True)
+    # 2. Table with Absolute Gradient
+    cols_to_use = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F", "Outcome"]
+    cols_visible = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
 
+    st.dataframe(
+        perf_df[cols_to_use].style.format({
+            "Shooting": "{:+.2f}", "Turnovers": "{:+.2f}", 
+            "Rebounding": "{:+.2f}", "Free Throws": "{:+.2f}", "Total 4F": "{:+.2f}"
+        })
+        .map(lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), subset=['Outcome'])
+        .background_gradient(cmap='RdYlGn', subset=["Total 4F"], vmin=-25, vmax=25), # Fixed scale
+        use_container_width=True, 
+        hide_index=True,
+        column_order=cols_visible # Hides the technical 'Outcome' column
+    )
+
+    # 3. PDF Button
     pdf_perf = generate_performance_pdf(perf_df, target_team, league, season, view_type)
     st.download_button("Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
+    
     st.stop()
 elif mode == "League Standings":
     # 1. Prepare Phase Options with an "Overall" choice
