@@ -9,6 +9,7 @@ import re
 from fpdf.enums import XPos, YPos
 import matplotlib.pyplot as plt
 import io
+import base64
 
 # --- CONFIGURATION ---
 DATA_BASE_PATH = "informes_data"
@@ -17,6 +18,7 @@ LOGOS_PATH = "logos"
 LEAGUE_CONFIG = {
     "ACB": {"games_per_round": 9, "logo": "acb.png"},
     "Euroleague": {"games_per_round": 10, "logo": "EL.png"}, # EL is 18 teams now
+    "Primera FEB": {"games_per_round": 8, "logo": "FEB.png"}, # 17 teams per group
     "Segunda FEB": {"games_per_round": 7, "logo": "FEB.png"}, # 14 teams per group
     "Tercera FEB": {"games_per_round": 7, "logo": "FEB.png"}, # Usually 14 teams
 }
@@ -26,6 +28,26 @@ def clean_num(val):
     except: return 0.0
 
 # --- HELPERS ---
+def get_team_icon(team_name):
+    """Encodes the team logo as a Base64 string for dataframe rendering."""
+    clean_name = str(team_name).strip()
+    
+    # Path for the OS to find the file
+    os_path = os.path.join(LOGOS_PATH, "teams", f"{clean_name}.png")
+    
+    # Check if team logo exists, if not, use fallback
+    if not os.path.exists(os_path):
+        os_path = os.path.join(LOGOS_PATH, "FEB.png")
+    
+    # Convert image file to Base64 string
+    if os.path.exists(os_path):
+        try:
+            with open(os_path, "rb") as f:
+                data = base64.b64encode(f.read()).decode("utf-8")
+                return f"data:image/png;base64,{data}"
+        except Exception:
+            return None
+    return None
 def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
     labels = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
     vals_l = [data_l[k] for k in labels]
@@ -720,78 +742,50 @@ if mode == "Season Aggregate":
     i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
     header_title = f"{season} 4-Factors Aggregate: {t1} vs {t2}"
 elif mode == "Team Performance":
-    # 1. Get available phases from the index
     phases_avail = sorted(df_league['phase'].unique())
     sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
     
-    # --- NEW: DYNAMIC TEAM FILTERING BY PHASE ---
-    # We look at the index and only grab teams that have games in the selected phase
     df_phase_indexed = df_league[df_league['phase'] == sel_phase]
     teams_in_phase = sorted(list(set(df_phase_indexed['t1'].unique()) | set(df_phase_indexed['t2'].unique())))
     
     if not teams_in_phase:
-        st.sidebar.warning("No teams found in the index for this phase.")
+        st.sidebar.warning("No teams found for this phase.")
         st.stop()
         
     target_team = st.sidebar.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
-    # ---------------------------------------------
     
-    # --- RESET LOGIC (Clears filters when context changes) ---
+    # --- RESET LOGIC ---
     current_context = f"{league}_{season}_{sel_phase}_{target_team}"
-    if "last_context" not in st.session_state:
-        st.session_state["last_context"] = current_context
-
-    if st.session_state["last_context"] != current_context:
-        # Reset filter widgets to defaults
+    if st.session_state.get("last_context") != current_context:
         st.session_state["perf_res_choice"] = ["Win", "Loss"]
         st.session_state["perf_venue_choice"] = ["Home", "Away"]
         if "perf_range_rnds" in st.session_state: del st.session_state["perf_range_rnds"]
-        if "perf_specific_rnds" in st.session_state: st.session_state["perf_specific_rnds"] = []
-        
         st.session_state["last_context"] = current_context
         st.rerun()
-    # ---------------------------------------------------------
 
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
+    # Filter games
     df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
                         ((df_league['t1'] == target_team) | (df_league['t2'] == target_team))].copy()
     
-    if df_team.empty:
-        st.warning(f"No games found for {target_team}.")
-        st.stop()
-
     df_team['is_win'] = df_team.apply(lambda x: (x['pts1'] > x['pts2'] if x['t1'] == target_team else x['pts2'] > x['pts1']), axis=1)
     df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
 
-    st.sidebar.markdown("---")
-    st.sidebar.subheader("Filter Game Stretch")
     all_rnds = sorted(df_team['round'].unique())
-
-    specific_rnds = st.sidebar.multiselect("Pick Specific Rounds", all_rnds, key="perf_specific_rnds")
     res_choice = st.sidebar.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
     venue_choice = st.sidebar.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
-    
-    if len(all_rnds) > 1:
-        range_rnds = st.sidebar.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
-    else:
-        range_rnds = (all_rnds[0], all_rnds[0])
+    range_rnds = st.sidebar.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
 
-    if specific_rnds:
-        df_filtered = df_team[df_team['round'].isin(specific_rnds)]
-        filter_msg = f"Specific Rounds: {', '.join(specific_rnds)}"
-    else:
-        allowed_wins = [True if r == "Win" else False for r in res_choice]
-        start_idx = all_rnds.index(range_rnds[0]); end_idx = all_rnds.index(range_rnds[1])
-        allowed_range = all_rnds[start_idx : end_idx+1]
-        df_filtered = df_team[(df_team['is_win'].isin(allowed_wins)) & (df_team['venue'].isin(venue_choice)) & (df_team['round'].isin(allowed_range))]
-        filter_msg = f"Filters: {'/'.join(res_choice)} | {'/'.join(venue_choice)} | {range_rnds[0]}-{range_rnds[1]}"
+    allowed_wins = [True if r == "Win" else False for r in res_choice]
+    start_idx = all_rnds.index(range_rnds[0]); end_idx = all_rnds.index(range_rnds[1])
+    allowed_range = all_rnds[start_idx : end_idx+1]
+    df_filtered = df_team[(df_team['is_win'].isin(allowed_wins)) & (df_team['venue'].isin(venue_choice)) & (df_team['round'].isin(allowed_range))]
 
     if df_filtered.empty:
         st.error("No games match this filter combination.")
         st.stop()
 
-    # [Start of the Data Collection Loop]
     performance_data = []
     for _, row in df_filtered.sort_values('round').iterrows():
         g = get_raw_game_data_custom(row['path'])
@@ -803,91 +797,73 @@ elif mode == "Team Performance":
         f_def = calc_raw_factors(stats_opp, stats_self['drb'], lg_effic, lg_orb_pct)
         f_def_inv = {k: -v for k, v in f_def.items()} 
         
-        if view_type == "Offensive Impact": display_vals = f_off
-        elif view_type == "Defensive Impact": display_vals = f_def_inv
-        else: display_vals = {k: f_off[k] + f_def_inv[k] for k in f_off}
+        display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
+        opp_name = row['t2'] if is_t1 else row['t1']
         
-        # KEY FIX: Ensure "Outcome" is added to this dictionary
-        entry = {
-            "Round": row['round'], 
-            "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} vs {row['t2'] if is_t1 else row['t1']}",
-            "Shooting": display_vals['Shooting'], 
-            "Turnovers": display_vals['Turnovers'],
-            "Rebounding": display_vals['Rebounding'], 
-            "Free Throws": display_vals['Free Throws'],
+        performance_data.append({
+            "Round": row['round'],
+            "Opp_Logo": get_team_icon(opp_name), # Only one logo key
+            "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} vs {opp_name}",
+            "Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'],
+            "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'],
             "Total 4F": sum(display_vals.values()),
-            "Outcome": "W" if row['is_win'] else "L" # <--- THIS LINE WAS MISSING
-        }
-        
-        # Add components for the top summary cards
-        for f in ["Shooting", "Turnovers", "Rebounding", "Free Throws"]:
-            entry[f"{f}_Off"] = f_off[f]
-            entry[f"{f}_Def"] = f_def_inv[f]
-            entry[f"{f}_Net"] = f_off[f] + f_def_inv[f]
-
-        performance_data.append(entry)
+            "Outcome": "W" if row['is_win'] else "L",
+            "Shooting_Net": f_off['Shooting'] + f_def_inv['Shooting'], "Shooting_Off": f_off['Shooting'], "Shooting_Def": f_def_inv['Shooting'],
+            "Rebounding_Net": f_off['Rebounding'] + f_def_inv['Rebounding'], "Rebounding_Off": f_off['Rebounding'], "Rebounding_Def": f_def_inv['Rebounding'],
+            "Turnovers_Net": f_off['Turnovers'] + f_def_inv['Turnovers'], "Turnovers_Off": f_off['Turnovers'], "Turnovers_Def": f_def_inv['Turnovers'],
+            "Free Throws_Net": f_off['Free Throws'] + f_def_inv['Free Throws'], "Free Throws_Off": f_off['Free Throws'], "Free Throws_Def": f_def_inv['Free Throws']
+        })
 
     perf_df = pd.DataFrame(performance_data)
     
-    # --- DISPLAY SECTION ---
-    st.subheader(f"{target_team} - {view_type} Summary")
-    
-    # 1. Summary Metrics (Batch averages)
-    col_s, col_r, col_t, col_f = st.columns(4)
-    factors_list = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
-    cols_map = {"Shooting": col_s, "Rebounding": col_r, "Turnovers": col_t, "Free Throws": col_f}
+    # Header
+    h_col1, h_col2 = st.columns([1, 8])
+    with h_col1: st.image(get_team_icon(target_team), width=80)
+    with h_col2: st.title(f"{target_team}"); st.markdown(f"**{sel_phase}** | {view_type}")
 
-    for f_name in factors_list:
-        with cols_map[f_name]:
-            st.markdown(f"#### {f_name}")
-            st.markdown(f"**Net: {perf_df[f_name+'_Net'].mean():+.2f}**")
-            st.caption(f"O: {perf_df[f_name+'_Off'].mean():+.2f} | D: {perf_df[f_name+'_Def'].mean():+.2f}")
+    # Metrics
+    c_s, c_r, c_t, c_f = st.columns(4)
+    for f_n, col in zip(["Shooting", "Rebounding", "Turnovers", "Free Throws"], [c_s, c_r, c_t, c_f]):
+        with col:
+            st.markdown(f"#### {f_n}")
+            st.markdown(f"**Net: {perf_df[f_n+'_Net'].mean():+.2f}**")
+            st.caption(f"O: {perf_df[f_n+'_Off'].mean():+.2f} | D: {perf_df[f_n+'_Def'].mean():+.2f}")
 
     st.markdown("---")
-
-    # 2. Table with Absolute Gradient
-    cols_to_use = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F", "Outcome"]
-    cols_visible = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
+    cols_to_use = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F", "Outcome"]
+    cols_visible = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
 
     st.dataframe(
-        perf_df[cols_to_use].style.format({
-            "Shooting": "{:+.2f}", "Turnovers": "{:+.2f}", 
-            "Rebounding": "{:+.2f}", "Free Throws": "{:+.2f}", "Total 4F": "{:+.2f}"
-        })
+        perf_df[cols_to_use].style.format({k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]})
         .map(lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), subset=['Outcome'])
-        .background_gradient(cmap='RdYlGn', subset=["Total 4F"], vmin=-25, vmax=25), # Fixed scale
-        use_container_width=True, 
-        hide_index=True,
-        column_order=cols_visible # Hides the technical 'Outcome' column
+        .background_gradient(cmap='RdYlGn', subset=["Total 4F"], vmin=-25, vmax=25),
+        use_container_width=True, hide_index=True, column_order=cols_visible,
+        column_config={
+            "Opp_Logo": st.column_config.ImageColumn("Opp", width="small"),
+            "Round": st.column_config.TextColumn("Rnd", width="small")
+        }
     )
-
-    # 3. PDF Button
-    pdf_perf = generate_performance_pdf(perf_df, target_team, league, season, view_type)
-    st.download_button("Download Filtered PDF", pdf_perf, f"Analysis_{target_team}.pdf")
-    
+    st.download_button("Download PDF", generate_performance_pdf(perf_df, target_team, league, season, view_type), f"Scout_{target_team}.pdf")
     st.stop()
 elif mode == "League Standings":
-    # 1. Prepare Phase Options with an "Overall" choice
+    # 1. Phase Selection
     phases_in_index = sorted(df_league['phase'].unique())
     phase_options = ["Overall Season"] + phases_in_index
-    selected_phase = st.sidebar.selectbox("Competition Phase / Group", phase_options, key="standings_phase")
+    selected_phase = st.sidebar.selectbox("Phase / Group", phase_options, key="standings_phase")
     
-    st.subheader(f"{league} {season} - {selected_phase} Standings")
+    st.subheader(f"{league} {season} - {selected_phase}")
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
-    # 2. FILTER TEAMS: Only get teams that actually played in the selected phase
+    # 2. Filter Teams
     if selected_phase == "Overall Season":
-        # Get all teams that played in any phase/group this season
         teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
     else:
-        # Get only teams that appear in the selected group (e.g., ESTE)
-        df_phase_teams = df_league[df_league['phase'] == selected_phase]
-        teams_to_analyze = sorted(list(set(df_phase_teams['t1'].unique()) | set(df_phase_teams['t2'].unique())))
+        df_ph = df_league[df_league['phase'] == selected_phase]
+        teams_to_analyze = sorted(list(set(df_ph['t1'].unique()) | set(df_ph['t2'].unique())))
 
     league_results = []
-    with st.spinner(f"Calculating {len(teams_to_analyze)} teams..."):
+    with st.spinner("Calculating standings..."):
         for team in teams_to_analyze:
-            # 3. GET DATA: If "Overall", we search all folders. If specific, we target the group.
             if selected_phase == "Overall Season":
                 t_off = get_per_game_volumes(team, league, season, "TOTAL")
                 t_def = get_per_game_volumes(team, league, season, "Rival")
@@ -901,80 +877,36 @@ elif mode == "League Standings":
             t_off_raw = calc_raw_factors(t_off, lg_data['drb'], lg_effic, lg_orb_pct)
             t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
             
-            off_impact = {k: (t_off_raw[k] - lg_raw[k]) for k in lg_raw}
-            def_impact = {k: (lg_raw[k] - t_def_raw[k]) for k in lg_raw}
-            net_impact = {k: off_impact[k] + def_impact[k] for k in lg_raw}
+            off_i = {k: (t_off_raw[k] - lg_raw[k]) for k in lg_raw}
+            def_i = {k: (lg_raw[k] - t_def_raw[k]) for k in lg_raw}
+            net_i = {k: off_i[k] + def_i[k] for k in lg_raw}
             
-            display = off_impact if view_type == "Offensive Impact" else (def_impact if view_type == "Defensive Impact" else net_impact)
+            disp = off_i if view_type == "Offensive Impact" else (def_i if view_type == "Defensive Impact" else net_i)
                 
             league_results.append({
-                "Team": team, "Shooting": display['Shooting'], "Turnovers": display['Turnovers'],
-                "Rebounding": display['Rebounding'], "Free Throws": display['Free Throws'],
-                "Net Points": sum(display.values())
+                "Team_Logo": get_team_icon(team),
+                "Team": team, 
+                "Shooting": disp['Shooting'], "Turnovers": disp['Turnovers'],
+                "Rebounding": disp['Rebounding'], "Free Throws": disp['Free Throws'],
+                "Net Points": sum(disp.values())
             })
             
     if not league_results:
-        st.error(f"No data found for '{selected_phase}'.")
-    else:
-        standings_df = pd.DataFrame(league_results).sort_values("Net Points", ascending=False)
-        standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
-
-        # Format and display the table
-        st.dataframe(
-            standings_df.style.format({k: "{:+.2f}" for k in standings_df.columns if k not in ["Team", "Rank"]})
-            .background_gradient(cmap='RdYlGn', subset=["Net Points"], vmin=-10, vmax=10),
-            use_container_width=True, height=600, hide_index=True
-        )
-
-        pdf_bytes = generate_standings_pdf(standings_df, league, season, selected_phase)
-        st.download_button("Download Standings PDF", data=pdf_bytes, file_name=f"Standings_{league}_{selected_phase}.pdf")
-
-    st.stop()
-    phases_available = sorted(df_league['phase'].unique())
-    selected_phase = st.sidebar.selectbox("Filter by Phase", phases_available, key="standings_phase")
-    
-    st.subheader(f"{league} {season} - {selected_phase} Standings")
-    view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
-    
-    teams = get_teams_in_league(league, season)
-    league_results = []
-
-    with st.spinner(f"Analyzing {len(teams)} teams..."):
-        for team in teams:
-            t_off = get_per_game_volumes_by_phase(team, league, season, selected_phase, "TOTAL")
-            t_def = get_per_game_volumes_by_phase(team, league, season, selected_phase, "Rival")
-            if t_off['pts'] == 0: continue 
-
-            lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
-            t_off_raw = calc_raw_factors(t_off, lg_data['drb'], lg_effic, lg_orb_pct)
-            t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
-            
-            off_impact = {k: (t_off_raw[k] - lg_raw[k]) for k in lg_raw}
-            def_impact = {k: (lg_raw[k] - t_def_raw[k]) for k in lg_raw}
-            net_impact = {k: off_impact[k] + def_impact[k] for k in lg_raw}
-            
-            display = off_impact if view_type == "Offensive Impact" else (def_impact if view_type == "Defensive Impact" else net_impact)
-                
-            league_results.append({
-                "Team": team, "Shooting": display['Shooting'], "Turnovers": display['Turnovers'],
-                "Rebounding": display['Rebounding'], "Free Throws": display['Free Throws'],
-                "Net Points": sum(display.values())
-            })
-            
-    if not league_results:
-        st.error(f"No aggregate data found for '{selected_phase}'.")
+        st.error(f"No data found for {selected_phase}")
     else:
         standings_df = pd.DataFrame(league_results).sort_values("Net Points", ascending=False)
         standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
 
         st.dataframe(
-            standings_df.style.format({k: "{:+.2f}" for k in standings_df.columns if k not in ["Team", "Rank"]})
+            standings_df.style.format({k: "{:+.2f}" for k in standings_df.columns if k not in ["Team", "Rank", "Team_Logo"]})
             .background_gradient(cmap='RdYlGn', subset=["Net Points"], vmin=-10, vmax=10),
-            use_container_width=True, height=600, hide_index=True
+            use_container_width=True, height=600, hide_index=True,
+            column_config={
+                "Team_Logo": st.column_config.ImageColumn(" ", width="small"),
+                "Rank": st.column_config.NumberColumn("Pos", width="small")
+            }
         )
-
-        pdf_bytes = generate_standings_pdf(standings_df, league, season, selected_phase)
-        st.download_button("Download Standings PDF", data=pdf_bytes, file_name=f"Standings_{league}_{selected_phase}.pdf")
+        st.download_button("Download Standings PDF", generate_standings_pdf(standings_df, league, season, selected_phase), f"Standings_{selected_phase}.pdf")
 
     st.stop()
 else: # Game Boxscore mode
