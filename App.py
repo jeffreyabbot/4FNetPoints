@@ -60,6 +60,83 @@ def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
     plt.close(fig)
     buf.seek(0)
     return buf
+def pdf_safe_text(text):
+    """Universal sanitizer for FPDF Helvetica."""
+    if not text: return ""
+    s = str(text)
+    # Manual icon fixes
+    s = s.replace("🟢", "W").replace("🔴", "L").replace("🏠", "(H)").replace("✈️", "(A)").replace("✈", "(A)")
+    # Convert to Latin-1 and ignore what doesn't fit (Standard for Helvetica)
+    return s.encode('latin-1', 'ignore').decode('latin-1')
+
+def generate_standings_pdf(df, league, season, phase):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, pdf_safe_text(f"{league} Standings - {season}"), ln=True, align='C')
+    pdf.set_font("Helvetica", '', 12)
+    pdf.cell(0, 10, pdf_safe_text(f"Phase: {phase}"), ln=True, align='C')
+    pdf.ln(10)
+
+    pdf.set_font("Helvetica", 'B', 9)
+    cols = ["Rank", "Team", "Shoot", "TOv", "Reb", "FT", "Net"]
+    widths = [12, 65, 23, 23, 23, 23, 21]
+    for i, col in enumerate(cols):
+        pdf.cell(widths[i], 8, col, border=1, align='C')
+    pdf.ln()
+
+    pdf.set_font("Helvetica", '', 8)
+    for _, row in df.iterrows():
+        pdf.cell(widths[0], 7, str(row['Rank']), border=1, align='C')
+        pdf.cell(widths[1], 7, pdf_safe_text(row['Team'])[:35], border=1)
+        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
+        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
+        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
+        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
+        pdf.cell(widths[6], 7, f"{row['Net Points']:+.2f}", border=1, align='C')
+        pdf.ln()
+    return bytes(pdf.output(dest='S'))
+
+def generate_performance_pdf(df, team, league, season, view_type):
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", 'B', 16)
+    pdf.cell(0, 10, pdf_safe_text(f"Scouting Report: {team}"), ln=True, align='C')
+    pdf.set_font("Helvetica", '', 12)
+    pdf.cell(0, 8, pdf_safe_text(f"{league} {season} | {view_type}"), ln=True, align='C')
+    pdf.ln(5)
+
+    # Summary Box
+    pdf.set_fill_color(245, 245, 245)
+    pdf.set_font("Helvetica", 'B', 11)
+    pdf.cell(0, 10, "  Batch Scouting Summary (Averages)", border=1, ln=True, fill=True)
+    pdf.set_font("Helvetica", '', 9)
+    for f in ["Shooting", "Rebounding", "Turnovers", "Free Throws"]:
+        line = f" {f}: Net {df[f+'_Net'].mean():+.2f} | Off: {df[f+'_Off'].mean():+.2f} | Def: {df[f+'_Def'].mean():+.2f}"
+        pdf.cell(0, 7, pdf_safe_text(line), border='LR', ln=True)
+    pdf.cell(190, 0, "", border='T', ln=True)
+    pdf.ln(8)
+
+    # Table
+    pdf.set_font("Helvetica", 'B', 10)
+    cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
+    widths = [20, 60, 22, 22, 22, 22, 22]
+    for i, col in enumerate(cols):
+        pdf.cell(widths[i], 8, col, border=1, align='C')
+    pdf.ln()
+
+    pdf.set_font("Helvetica", '', 8)
+    for _, row in df.iterrows():
+        pdf.cell(widths[0], 7, pdf_safe_text(str(row['Round'])), border=1, align='C')
+        pdf.cell(widths[1], 7, pdf_safe_text(row['Matchup']), border=1)
+        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
+        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
+        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
+        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
+        pdf.cell(widths[6], 7, f"{row['Total 4F']:+.2f}", border=1, align='C')
+        pdf.ln()
+        if pdf.get_y() > 270: pdf.add_page()
+    return bytes(pdf.output(dest='S'))
 def get_per_game_volumes_by_phase(team_name, league, season, phase, row_label="TOTAL"):
     # Convert UI phase name (e.g. "Regular Season - ESTE") back to folder name ("Regular_Season")
     # We take the part before the " - " and replace spaces with underscores
@@ -334,178 +411,7 @@ from fpdf.enums import XPos, YPos
 from fpdf.enums import XPos, YPos
 
 from fpdf.enums import XPos, YPos
-def generate_performance_pdf(df, team, league, season, view_type):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"{team} - {view_type} Log", ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 10, f"{league} {season}", ln=True, align='C')
-    pdf.ln(10)
 
-    pdf.set_font("Helvetica", 'B', 9)
-    # Updated Header name to Matchup
-    cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
-    widths = [20, 60, 22, 22, 22, 22, 22]
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C')
-    pdf.ln()
-
-    pdf.set_font("Helvetica", '', 8)
-    for _, row in df.iterrows():
-        
-        match_text = str(row['Matchup'])
-        
-        pdf.cell(widths[0], 7, str(row['Round']), border=1, align='C')
-        pdf.cell(widths[1], 7, match_text, border=1)
-        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
-        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
-        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
-        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
-        pdf.cell(widths[6], 7, f"{row['Total 4F']:+.2f}", border=1, align='C')
-        pdf.ln()
-        if pdf.get_y() > 260: pdf.add_page()
-    return bytes(pdf.output(dest='S'))
-
-def generate_standings_pdf(df, fig, league, season, phase):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # --- PAGE 1: TABLE ---
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"{league} - {season}", ln=True, align='C')
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(0, 10, f"Standings Breakdown: {phase}", ln=True, align='C')
-    pdf.ln(5)
-
-    # Table Headers
-    pdf.set_font("Helvetica", 'B', 9)
-    pdf.set_fill_color(230, 230, 230)
-    cols = ["Rank", "Team", "Shoot", "TOv", "Reb", "FT", "Net"]
-    widths = [12, 65, 23, 23, 23, 23, 21]
-    
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C', fill=True)
-    pdf.ln()
-
-    # Table Rows
-    pdf.set_font("Helvetica", '', 8)
-    for _, row in df.iterrows():
-        pdf.cell(widths[0], 7, str(row['Rank']), border=1, align='C')
-        pdf.cell(widths[1], 7, str(row['Team'])[:35], border=1)
-        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
-        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
-        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
-        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
-        pdf.cell(widths[6], 7, f"{row['Net Points']:+.2f}", border=1, align='C')
-        pdf.ln()
-
-    # --- PAGE 2: CHART ---
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.cell(0, 10, "Shooting vs Ball Security Map", ln=True, align='C')
-    pdf.ln(10)
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        # High resolution export
-        fig.write_image(tmpfile.name, format="png", width=1200, height=700, scale=3)
-        # Position image on the middle of the second page
-        pdf.image(tmpfile.name, x=5, y=30, w=200)
-
-    return bytes(pdf.output(dest='S'))
-def generate_standings_pdf(df, league, season, phase):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"{league} Standings - {season}", ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 10, f"Phase: {phase}", ln=True, align='C')
-    pdf.ln(10)
-
-    # Table Headers
-    pdf.set_font("Helvetica", 'B', 9)
-    cols = ["Rank", "Team", "Shoot", "TOv", "Reb", "FT", "Net"]
-    widths = [12, 65, 23, 23, 23, 23, 21]
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C')
-    pdf.ln()
-
-    # Table Rows
-    pdf.set_font("Helvetica", '', 8)
-    for _, row in df.iterrows():
-        pdf.cell(widths[0], 7, str(row['Rank']), border=1, align='C')
-        pdf.cell(widths[1], 7, str(row['Team'])[:35], border=1)
-        pdf.cell(widths[2], 7, f"{row['Shooting']:+.2f}", border=1, align='C')
-        pdf.cell(widths[3], 7, f"{row['Turnovers']:+.2f}", border=1, align='C')
-        pdf.cell(widths[4], 7, f"{row['Rebounding']:+.2f}", border=1, align='C')
-        pdf.cell(widths[5], 7, f"{row['Free Throws']:+.2f}", border=1, align='C')
-        pdf.cell(widths[6], 7, f"{row['Net Points']:+.2f}", border=1, align='C')
-        pdf.ln()
-    return bytes(pdf.output(dest='S'))
-def generate_performance_pdf(df, team, league, season, view_type):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # Header
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"Scouting Report: {team}", ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 8, f"{league} {season} | {view_type}", ln=True, align='C')
-    pdf.ln(5)
-
-    # --- NEW: BATCH SCOUTING SUMMARY SECTION ---
-    pdf.set_fill_color(245, 245, 245)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(0, 10, "  Batch Scouting Summary (Averages)", border=1, ln=True, fill=True)
-    
-    pdf.set_font("Helvetica", '', 9)
-    # Define factors to summarize
-    factors = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
-    
-    # Draw a summary box for each factor
-    for f in factors:
-        net_val = df[f"{f}_Net"].mean()
-        off_val = df[f"{f}_Off"].mean()
-        def_val = df[f"{f}_Def"].mean()
-        
-        # Line text
-        summary_line = f" {f}: Net {net_val:+.2f} | Offense: {off_val:+.2f} | Defense: {def_val:+.2f}"
-        pdf.cell(0, 7, summary_line, border='LR', ln=True)
-    
-    # Bottom border of the summary box
-    pdf.cell(0, 0, "", border='T', ln=True)
-    pdf.ln(8)
-
-    # --- GAME LOG TABLE ---
-    pdf.set_font("Helvetica", 'B', 10)
-    pdf.set_fill_color(230, 230, 230)
-    cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
-    widths = [20, 60, 22, 22, 22, 22, 22]
-    
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C', fill=True)
-    pdf.ln()
-
-    pdf.set_font("Helvetica", '', 8)
-    for _, row_data in df.iterrows():
-        # Clean icons for PDF safety
-        match_text = str(row_data['Matchup'])
-        match_text = match_text.replace("🟢", "W").replace("🔴", "L").replace("🏠", "(H)").replace("✈️", "(A)").replace("✈", "(A)")
-        match_text = match_text.encode('ascii', 'ignore').decode('ascii')
-        
-        pdf.cell(widths[0], 7, str(row_data['Round']), border=1, align='C')
-        pdf.cell(widths[1], 7, match_text, border=1)
-        pdf.cell(widths[2], 7, f"{row_data['Shooting']:+.2f}", border=1, align='C')
-        pdf.cell(widths[3], 7, f"{row_data['Turnovers']:+.2f}", border=1, align='C')
-        pdf.cell(widths[4], 7, f"{row_data['Rebounding']:+.2f}", border=1, align='C')
-        pdf.cell(widths[5], 7, f"{row_data['Free Throws']:+.2f}", border=1, align='C')
-        pdf.cell(widths[6], 7, f"{row_data['Total 4F']:+.2f}", border=1, align='C')
-        pdf.ln()
-        
-        if pdf.get_y() > 270:
-            pdf.add_page()
-            
-    return bytes(pdf.output(dest='S'))
 def generate_pdf_report(chart_buf, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_def, i2_tot, i2_off, i2_def, text_t1, text_t2, summary_data=None):
     pdf = FPDF()
     pdf.add_page()
@@ -702,7 +608,13 @@ if os.path.exists(logo_full_path):
     with col2:
         st.image(logo_full_path, width=150)
 st.sidebar.title("Scouting 4F Net Points")
-if st.sidebar.button("Refresh Data Index"): build_game_index(); st.rerun()
+if st.sidebar.button("Refresh Data Index"):
+    # 1. Physically rebuild the file
+    build_game_index()
+    # 2. CLEAR STREAMLIT'S CACHE so it re-reads the JSON
+    st.cache_data.clear()
+    # 3. Rerun
+    st.rerun()
 
 mode = st.sidebar.radio("View Mode", ["Season Aggregate", "Game Boxscore", "Team Performance", "League Standings"], key="mode_radio")
 
