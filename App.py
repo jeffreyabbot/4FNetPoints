@@ -913,6 +913,20 @@ st.markdown("""
             padding: 8px !important;
             border-radius: 8px !important;
         }
+        /* 11. FIX EXPANDER HOVER (Glossary) */
+        [data-testid="stSidebar"] details summary:hover {
+            background-color: #2d324a !important; /* Same as your selectbox background */
+            border-radius: 4px;
+        }
+        
+        [data-testid="stSidebar"] details summary:hover * {
+            color: #ffffff !important; /* Force text to stay white */
+        }
+
+        /* Ensure the expander icon (chevron) also stays white */
+        [data-testid="stSidebar"] details summary svg {
+            fill: #ffffff !important;
+        }
         [data-testid="stSidebar"] hr {
             margin: 0.8rem 0 !important;
             border-top: 1px solid #3f445e !important;
