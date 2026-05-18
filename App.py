@@ -112,56 +112,24 @@ def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
     vals_l = [data_l[k] for k in labels]
     vals_r = [data_r[k] for k in labels]
     
-    # Create plot
     fig, ax = plt.subplots(figsize=(10, 5))
     y = range(len(labels))
     width = 0.35
     
-    # Plot bars (Horizontal like your Plotly chart)
-    # Color 1: Blue (#2980B9), Color 2: Gold (#7E6605)
-    bar1 = ax.barh([i + width/2 for i in y], vals_l, width, label=team_l, color='#2980B9')
-    bar2 = ax.barh([i - width/2 for i in y], vals_r, width, label=team_r, color='#7E6605')
+    # UPDATED COLORS: Dark Blue (#1e2130) and Red (#F00000)
+    bar1 = ax.barh([i + width/2 for i in y], vals_l, width, label=team_l, color='#1e2130')
+    bar2 = ax.barh([i - width/2 for i in y], vals_r, width, label=team_r, color='#F00000')
     
-    # Add labels on bars
     ax.bar_label(bar1, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
     ax.bar_label(bar2, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
-    
-    # Formatting
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.invert_yaxis() # Labels top-to-bottom
-    ax.axvline(0, color='black', linewidth=1) # Zero line
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1), ncol=2, frameon=False)
-    
-    # Save to buffer
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-def create_pdf_situational_mpl(s1, s2, t1, t2):
-    labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
-    vals_t1 = [s1.get("pts_off_to", 0), s1.get("pts_2nd_ch", 0), s1.get("pts_fb", 0)]
-    vals_t2 = [s2.get("pts_off_to", 0), s2.get("pts_2nd_ch", 0), s2.get("pts_fb", 0)]
-    
-    fig, ax = plt.subplots(figsize=(10, 4))
-    y = range(len(labels))
-    width = 0.35
-    
-    bar1 = ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#1e2130')
-    bar2 = ax.barh([i - width/2 for i in y], vals_r := vals_t2, width, label=t2, color='#F00000')
-    
-    ax.bar_label(bar1, fmt='%.1f', padding=3, fontsize=9)
-    ax.bar_label(bar2, fmt='%.1f', padding=3, fontsize=9)
     
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.invert_yaxis()
+    ax.axvline(0, color='black', linewidth=1)
     ax.spines['top'].set_visible(False)
     ax.spines['right'].set_visible(False)
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False)
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1), ncol=2, frameon=False)
     
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
@@ -178,11 +146,12 @@ def create_pdf_situational_mpl(s1, s2, t1, t2):
     y = range(len(labels))
     width = 0.35
     
-    bar1 = ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#2980B9')
-    bar2 = ax.barh([i - width/2 for i in y], vals_r := vals_t2, width, label=t2, color='#7E6605')
+    # UPDATED COLORS: Dark Blue (#1e2130) and Red (#F00000)
+    bar1 = ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#1e2130')
+    bar2 = ax.barh([i - width/2 for i in y], vals_t2, width, label=t2, color='#F00000')
     
-    ax.bar_label(bar1, fmt='%.1f', padding=3, fontsize=9)
-    ax.bar_label(bar2, fmt='%.1f', padding=3, fontsize=9)
+    ax.bar_label(bar1, fmt='%.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
+    ax.bar_label(bar2, fmt='%.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
     
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
@@ -200,30 +169,54 @@ def create_pdf_situational_mpl(s1, s2, t1, t2):
 def generate_unified_report(chart_buf, t1, t2, analysis_type, subtitle, table_data=None):
     pdf = FPDF()
     pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"{analysis_type}: {t1} vs {t2}", ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 8, subtitle, ln=True, align='C')
+    
+    # Standard A4 printable width is 190mm (210mm total - 10mm margins on each side)
+    effective_width = 190 
+    
+    # 1. Main Title
+    pdf.set_font("Helvetica", 'B', 14)
+    # We explicitly set X to the margin (10) to reset the cursor
+    pdf.set_x(10) 
+    pdf.multi_cell(effective_width, 8, pdf_safe_text(f"{analysis_type}: {t1} vs {t2}"), align='C')
+    
+    # 2. Subtitle
+    pdf.set_font("Helvetica", '', 11)
+    pdf.set_text_color(100, 100, 100)
+    # Reset X again to ensure subtitle is perfectly centered on the page
+    pdf.set_x(10)
+    pdf.multi_cell(effective_width, 8, pdf_safe_text(subtitle), align='C')
+    
+    pdf.set_text_color(0, 0, 0) # Reset to black
     pdf.ln(5)
     
+    # 3. Insert Chart
     with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
         tmpfile.write(chart_buf.getbuffer())
+        # Manual centering: Page is 210, Image is 180, so X should be 15
         pdf.image(tmpfile.name, x=15, w=180)
     pdf.ln(10)
     
+    # 4. Data Table
     if table_data:
+        # Move cursor to start of table (10mm margin)
+        pdf.set_x(10)
         pdf.set_font("Helvetica", 'B', 10)
         pdf.set_fill_color(230, 230, 230)
+        
+        # Table columns: 60 + 65 + 65 = 190mm
         pdf.cell(60, 8, "Metric", border=1, fill=True)
-        pdf.cell(60, 8, t1, border=1, fill=True, align='C')
-        pdf.cell(60, 8, t2, border=1, fill=True, align='C')
+        pdf.cell(65, 8, pdf_safe_text(t1)[:30], border=1, fill=True, align='C')
+        pdf.cell(65, 8, pdf_safe_text(t2)[:30], border=1, fill=True, align='C')
         pdf.ln()
+        
         pdf.set_font("Helvetica", '', 10)
         for label, v1, v2 in table_data:
+            pdf.set_x(10) # Reset X for every row
             pdf.cell(60, 8, label, border=1)
-            pdf.cell(60, 8, str(v1), border=1, align='C')
-            pdf.cell(60, 8, str(v2), border=1, align='C')
+            pdf.cell(65, 8, str(v1), border=1, align='C')
+            pdf.cell(65, 8, str(v2), border=1, align='C')
             pdf.ln()
+            
     return bytes(pdf.output(dest='S'))
 def pdf_safe_text(text):
     """Universal sanitizer for FPDF Helvetica."""
@@ -243,39 +236,52 @@ def generate_standings_pdf(df, league, season, phase, analysis_type):
     pdf.cell(0, 10, pdf_safe_text(f"Phase: {phase} | {analysis_type}"), ln=True, align='C')
     pdf.ln(10)
 
-    pdf.set_font("Helvetica", 'B', 9)
+    pdf.set_font("Helvetica", 'B', 8)
     
-    # Define columns based on analysis type
     if analysis_type == "4-Factors Net Points":
         cols = ["Rank", "Team", "Shoot", "TOv", "Reb", "FT", "Net"]
         keys = ["Rank", "Team", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]
-        widths = [12, 65, 23, 23, 23, 23, 21]
+        # 10 + 65 + (23 * 5) = 190mm
+        widths = [10, 65, 23, 23, 23, 23, 23]
     else:
-        # Situational Columns
-        cols = ["Rank", "Team", "TO-P", "2nd-C", "FB-P", "eFG%", "ORB%", "TO%", "FTR"]
-        keys = ["Rank", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "ORB%", "TO%", "FTR"]
-        widths = [12, 60, 24, 24, 24, 23, 23, 23, 23]
+        # Situational: 9 columns
+        cols = ["Rank", "Team", "TO-P", "2nd-C", "FB-P", "eFG%", "TO%", "ORB%", "FTR"]
+        keys = ["Rank", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+        # 10 + 54 + (18 * 7) = 190mm
+        widths = [10, 54, 18, 18, 18, 18, 18, 18, 18]
 
     for i, col in enumerate(cols):
         pdf.cell(widths[i], 8, col, border=1, align='C')
     pdf.ln()
 
-    pdf.set_font("Helvetica", '', 8)
+    pdf.set_font("Helvetica", '', 7)
     for _, row in df.iterrows():
+        # Rank and Team
         pdf.cell(widths[0], 7, str(row['Rank']), border=1, align='C')
-        pdf.cell(widths[1], 7, pdf_safe_text(row['Team'])[:35], border=1)
+        t_name = pdf_safe_text(row['Team'])
+        if len(t_name) > 35: t_name = t_name[:32] + "..."
+        pdf.cell(widths[1], 7, t_name, border=1)
         
-        # Print the data columns
-        for i in range(2, 7):
-            val = row[keys[i]]
-            # Format numbers (add + sign for 4F, regular for situational)
+        # Stats Columns
+        for i in range(2, len(keys)):
+            key = keys[i]
+            val = row[key]
             if isinstance(val, (int, float)):
-                txt = f"{val:+.2f}" if analysis_type == "4-Factors Net Points" else f"{val:.2f}"
+                if analysis_type == "4-Factors Net Points":
+                    txt = f"{val:+.2f}"
+                else:
+                    if key in ["eFG%", "TO%", "ORB%"]:
+                        txt = f"{val:.1%}"
+                    elif key == "FTR":
+                        txt = f"{val:.2f}"
+                    else:
+                        txt = f"{val:.2f}"
             else:
                 txt = str(val)
             pdf.cell(widths[i], 7, txt, border=1, align='C')
         pdf.ln()
-        if pdf.get_y() > 270: pdf.add_page()
+        
+        if pdf.get_y() > 275: pdf.add_page()
         
     return bytes(pdf.output(dest='S'))
 
@@ -299,53 +305,73 @@ def generate_performance_pdf(df, team, league, season, view_type, analysis_type)
             line = f" {f}: Net {df[f+'_Net'].mean():+.2f} | Off: {df[f+'_Off'].mean():+.2f} | Def: {df[f+'_Def'].mean():+.2f}"
             pdf.cell(0, 7, pdf_safe_text(line), border='LR', ln=True)
     else:
+        # Situational Averages
         for f in ["Pts off TO", "2nd Chance", "Fast Break"]:
             line = f" {f}: Average {df[f].mean():.2f} pts per game"
             pdf.cell(0, 7, pdf_safe_text(line), border='LR', ln=True)
     pdf.cell(190, 0, "", border='T', ln=True)
     pdf.ln(8)
 
-    # 2. Setup Headers and Widths (Must match in length!)
-    pdf.set_font("Helvetica", 'B', 8) # Smaller font to fit more columns
+    # 2. Setup Headers and Widths
+    pdf.set_font("Helvetica", 'B', 8)
     if analysis_type == "4-Factors Net Points":
         cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
         data_keys = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-        widths = [15, 50, 25, 25, 25, 25, 25] # 7 items
+        # Total: 12 + 65 + (23 * 4) + 21 = 190mm
+        widths = [12, 65, 23, 23, 23, 23, 21] 
     else:
         # Situational: 9 columns
         cols = ["Round", "Matchup", "TO-P", "2nd-C", "FB-P", "eFG%", "TO%", "ORB%", "FTR"]
         data_keys = ["Round", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-        widths = [15, 45, 18, 18, 18, 19, 19, 19, 19] # 9 items, total 190mm
+        # Total: 12 + 52 + (18 * 7) = 190mm
+        widths = [12, 52, 18, 18, 18, 18, 18, 18, 18]
 
-    # Draw Headers
     for i, col in enumerate(cols):
         pdf.cell(widths[i], 8, col, border=1, align='C')
     pdf.ln()
 
     # 3. Draw Rows
-    pdf.set_font("Helvetica", '', 7) # Smaller font for data
+    pdf.set_font("Helvetica", '', 7)
     for _, row in df.iterrows():
+        # Column 0: Round
         pdf.cell(widths[0], 7, pdf_safe_text(str(row['Round'])), border=1, align='C')
-        pdf.cell(widths[1], 7, pdf_safe_text(row['Matchup']), border=1)
         
-        # Draw the rest of the dynamic columns
-        # Loop starts from index 2 because Round and Matchup are handled above
+        # Column 1: Matchup (Truncate long names to prevent overlap)
+        m_text = pdf_safe_text(row['Matchup'])
+        if analysis_type == "4-Factors Net Points":
+            limit = 45 # More space in 4F mode
+        else:
+            limit = 35 # Less space in Situational mode
+        if len(m_text) > limit: m_text = m_text[:limit-3] + "..."
+        pdf.cell(widths[1], 7, m_text, border=1)
+        
+        # Columns 2+: Data
         for i in range(2, len(data_keys)):
-            val = row[data_keys[i]]
+            key = data_keys[i]
+            val = row[key]
+            
             if isinstance(val, (int, float)):
-                # Use + format only for 4F Net Points
-                txt = f"{val:+.2f}" if analysis_type == "4-Factors Net Points" else f"{val:.2f}"
+                if analysis_type == "4-Factors Net Points":
+                    txt = f"{val:+.2f}"
+                else:
+                    if key in ["eFG%", "TO%", "ORB%"]:
+                        txt = f"{val:.1%}"
+                    elif key == "FTR":
+                        txt = f"{val:.2f}"
+                    else:
+                        txt = f"{val:.2f}"
             else:
                 txt = str(val)
+                
             pdf.cell(widths[i], 7, txt, border=1, align='C')
         pdf.ln()
         
+        # Page Break Logic
         if pdf.get_y() > 270: 
             pdf.add_page()
-            # Redraw headers on new page
             pdf.set_font("Helvetica", 'B', 8)
-            for i, col in enumerate(cols):
-                pdf.cell(widths[i], 8, col, border=1, align='C')
+            for j, col in enumerate(cols):
+                pdf.cell(widths[j], 8, col, border=1, align='C')
             pdf.ln()
             pdf.set_font("Helvetica", '', 7)
         
@@ -972,10 +998,19 @@ i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "
 lg_effic, lg_orb_pct, lg_data = get_league_benchmarks(league, season)
 # Calculate league midpoints for the "White" color
 lg_fga = lg_data['f2a'] + lg_data['f3a']
-avg_efg = (lg_data['f2m'] + 1.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
-avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if lg_fga > 0 else 0.15
-avg_ftr = lg_data['fta'] / lg_fga if lg_fga > 0 else 0.25
-avg_orb = lg_orb_pct # Already calculated in your code
+lg_fgm = lg_data['f2m'] + lg_data['f3m'] # Total Field Goals Made
+
+# eFG% = (FGM + 0.5 * 3PM) / FGA
+avg_efg = (lg_fgm + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
+
+# TO% = TOV / (FGA + 0.44 * FTA + TOV)
+avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) > 0 else 0.16
+
+# FTR = FTA / FGA
+avg_ftr = lg_data['ftm'] / lg_fga if lg_fga > 0 else 0.25
+
+# ORB% = Lg_ORB / (Lg_ORB + Lg_DRB) -> This represents the league average efficiency on the glass
+avg_orb = lg_orb_pct
 # --- LEAGUE BENCHMARKS DISPLAY ---
 st.sidebar.markdown("---")
 st.sidebar.markdown("**League Benchmarks**")
@@ -1072,34 +1107,32 @@ elif mode == "Team Performance by Game":
     for _, row in df_filtered.sort_values('round').iterrows():
         g = get_raw_game_data_custom(row['path'])
         if not g: continue
-        is_t1 = g['t1_name'] == target_team
-        stats_self, stats_opp = (g['t1_stats'], g['t2_stats']) if is_t1 else (g['t2_stats'], g['t1_stats'])
         
+        is_t1 = row['t1'] == target_team
+        stats_self, stats_opp = (g['t1_stats'], g['t2_stats']) if is_t1 else (g['t2_stats'], g['t1_stats'])
         opp_name = row['t2'] if is_t1 else row['t1']
-        # --- NEW SCORE LOGIC ---
-        # Format: [Target Team Score]-[Opponent Score]
+        
+        # Scores for the Matchup string
         self_score = row['pts1'] if is_t1 else row['pts2']
         opp_score = row['pts2'] if is_t1 else row['pts1']
-        score_display = f"{self_score}-{opp_score}"
         
         entry = {
             "Round": row['round'],
             "Opp_Logo": get_team_icon(opp_name),
-            "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} {score_display} vs {opp_name}",
+            "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} {self_score}-{opp_score} vs {opp_name}",
             "Outcome": "W" if row['is_win'] else "L"
         }
 
-        # CALCULATE 4F STATS (Always calculate these for the header metrics)
+        # 1. ALWAYS calculate 4F Impact for the "Net Points" header metrics
         f_off = calc_raw_factors(stats_self, stats_opp['drb'], lg_effic, lg_orb_pct)
         f_def = calc_raw_factors(stats_opp, stats_self['drb'], lg_effic, lg_orb_pct)
         f_def_inv = {k: -v for k, v in f_def.items()} 
-        
-        # Add the 'hidden' columns needed for the top metrics
         for f in ["Shooting", "Rebounding", "Turnovers", "Free Throws"]:
             entry[f"{f}_Net"] = f_off[f] + f_def_inv[f]
             entry[f"{f}_Off"] = f_off[f]
             entry[f"{f}_Def"] = f_def_inv[f]
 
+        # 2. CALCULATE View-Specific Data
         if analysis_type == "4-Factors Net Points":
             display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
             entry.update({
@@ -1108,30 +1141,30 @@ elif mode == "Team Performance by Game":
                 "Total 4F": sum(display_vals.values())
             })
         else:
-            # Situational Points View
-            entry.update({
-                "Pts off TO": stats_self['pts_off_to'],
-                "2nd Chance": stats_self['pts_2nd_ch'],
-                "Fast Break": stats_self['pts_fb'],
-            })
-            p = get_4f_percentages(stats_self, stats_opp)
-            entry.update(p)
+            # --- SITUATIONAL / CLASSIC VIEW ---
+            p_self = get_4f_percentages(stats_self, stats_opp)
+            p_opp = get_4f_percentages(stats_opp, stats_self)
+            
+            if view_type == "Offensive Impact":
+                entry.update({"Pts off TO": stats_self['pts_off_to'], "2nd Chance": stats_self['pts_2nd_ch'], "Fast Break": stats_self['pts_fb']})
+                entry.update(p_self)
+            elif view_type == "Defensive Impact":
+                entry.update({"Pts off TO": stats_opp['pts_off_to'], "2nd Chance": stats_opp['pts_2nd_ch'], "Fast Break": stats_opp['pts_fb']})
+                entry.update(p_opp)
+            else: # Net Impact
+                entry.update({
+                    "Pts off TO": stats_self['pts_off_to'] - stats_opp['pts_off_to'],
+                    "2nd Chance": stats_self['pts_2nd_ch'] - stats_opp['pts_2nd_ch'],
+                    "Fast Break": stats_self['pts_fb'] - stats_opp['pts_fb']
+                })
+                # Net Percentages (Self - Opp)
+                p_net = {k: p_self[k] - p_opp[k] for k in p_self}
+                entry.update(p_net)
 
         performance_data.append(entry)
 
     perf_df = pd.DataFrame(performance_data)
-    st.markdown("---")
-    perf_col1, perf_col2 = st.columns([1, 6])
-    with perf_col1:
-        team_logo = get_team_icon(target_team)
-        if team_logo:
-            st.image(team_logo, width=100)
-    with perf_col2:
-        st.title(f"Performance Report: {target_team}")
-        st.markdown(f"#### {analysis_type} | {sel_phase}")
-        st.caption(f"Season: {season} | Filters: {', '.join(res_choice)} | {', '.join(venue_choice)}")
-    
-    st.markdown("---")
+
     # --- TOP METRICS HEADER ---
     c_s, c_r, c_t, c_f = st.columns(4)
     if analysis_type == "4-Factors Net Points":
@@ -1141,37 +1174,41 @@ elif mode == "Team Performance by Game":
                 st.markdown(f"**Net: {perf_df[f_n+'_Net'].mean():+.2f}**")
                 st.caption(f"O: {perf_df[f_n+'_Off'].mean():+.2f} | D: {perf_df[f_n+'_Def'].mean():+.2f}")
     else:
-        # Show Situational Averages in the header instead
+        # Situational Header
         sit_labels = ["Pts off TO", "2nd Chance", "Fast Break", "GP"]
-        sit_cols = ["Pts off TO", "2nd Chance", "Fast Break", "Round"] # Round used just to count games
+        sit_cols = ["Pts off TO", "2nd Chance", "Fast Break", "Round"]
         for label, col_name, col_ui in zip(sit_labels, sit_cols, [c_s, c_r, c_t, c_f]):
             with col_ui:
                 st.markdown(f"#### {label}")
-                if label == "GP": st.markdown(f"**{len(perf_df)} Games**")
-                else: st.markdown(f"**Avg: {perf_df[col_name].mean():.2f}**")
-
+                if label == "GP": 
+                    st.markdown(f"**{len(perf_df)} Games**")
+                else: 
+                    avg_val = perf_df[col_name].mean()
+                    # Show + sign for Net Impact averages
+                    fmt = "{:+.2f}" if view_type == "Net Impact" else "{:.2f}"
+                    st.markdown(f"**Avg: {fmt.format(avg_val)}**")
     
-    # --- TABLE DISPLAY ---
+    # --- TABLE DISPLAY SETUP ---
     if analysis_type == "4-Factors Net Points":
         cols_visible = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
         format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]}
         grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
     else:
         cols_visible = ["Round", "Opp_Logo", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-        # 2. Formatting
-        format_dict = {
-            "Pts off TO": "{:.2f}", 
-            "2nd Chance": "{:.2f}", 
-            "Fast Break": "{:.2f}",
-            "eFG%": "{:.1%}", 
-            "TO%": "{:.1%}", 
-            "ORB%": "{:.1%}", 
-            "FTR": "{:.3f}"
-        }
-        grad_cols = ["Pts off TO", "2nd Chance", "Fast Break","eFG%", "TO%", "ORB%", "FTR"]
-
+        
+        # --- DYNAMIC FORMATTING FOR SITUATIONAL ---
+        if view_type == "Net Impact":
+            # Show + signs for differences
+            format_dict = {k: "{:+.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+            format_dict.update({k: "{:+.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+            format_dict["FTR"] = "{:+.3f}"
+        else:
+            # Standard absolute formatting
+            format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+            format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+            format_dict["FTR"] = "{:.3f}"
     st.markdown("---")
-    # 1. Initialize the styler with basic formatting
+    # 1. Initialize Styler
     styler = perf_df.style.format(format_dict).map(
         lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), 
         subset=['Outcome']
@@ -1179,15 +1216,28 @@ elif mode == "Team Performance by Game":
 
     # 2. Apply Conditional Gradients
     if analysis_type == "4-Factors Net Points":
-        # Standard Net Points Gradient (Symmetrical around 0)
+        # Always symmetrical around 0 for Net Points
         styler = styler.background_gradient(subset=grad_cols, cmap=custom_rdwgn, vmin=-15, vmax=15)
+    
     else:
-        # Situational Gradients (Context-aware)
-        styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wgn, vmin=0, vmax=30)
-        styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=avg_efg-0.12, vmax=avg_efg+0.12)
-        styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=avg_orb-0.15, vmax=avg_orb+0.15)
-        styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=avg_ftr-0.15, vmax=avg_ftr+0.15)
-        styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=avg_to-0.06, vmax=avg_to+0.06)
+        # --- SITUATIONAL GRADIENT LOGIC ---
+        if view_type == "Net Impact":
+            # For Net view, everything is symmetrical around 0
+            # Volumes use Red-White-Green because they can be negative here
+            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_rdwgn, vmin=-15, vmax=15)
+            styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=-0.12, vmax=0.12)
+            styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=-0.15, vmax=0.15)
+            styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=-0.15, vmax=0.15)
+            # For TO% Net: lower diff is better (Self - Opp), so use Inverted
+            styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=-0.06, vmax=0.06)
+        
+        else:
+            # Offensive or Defensive view: use League Averages as midpoints
+            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wgn, vmin=0, vmax=30)
+            styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=avg_efg-0.12, vmax=avg_efg+0.12)
+            styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=avg_orb-0.15, vmax=avg_orb+0.15)
+            styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=avg_ftr-0.15, vmax=avg_ftr+0.15)
+            styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=avg_to-0.06, vmax=avg_to+0.06)
 
     # 3. Render the dataframe
     st.dataframe(
@@ -1213,6 +1263,13 @@ elif mode == "Overall League Standings":
     st.subheader(f"{league} {season} - {selected_phase}")
     view_type = st.sidebar.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"])
     
+    # --- CALCULATION OF LEAGUE BENCHMARKS (MIDPOINTS) ---
+    lg_fga = lg_data['f2a'] + lg_data['f3a']
+    avg_efg = (lg_data['f2m'] + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
+    avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if lg_fga > 0 else 0.15
+    avg_ftr = lg_data['fta'] / lg_fga if lg_fga > 0 else 0.25
+    avg_orb = lg_orb_pct
+
     # 2. Filter Teams
     if selected_phase == "Overall Season":
         teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
@@ -1232,78 +1289,123 @@ elif mode == "Overall League Standings":
             
             if t_off['pts'] == 0: continue 
 
+            entry = {"Team_Logo": get_team_icon(team), "Team": team}
+
             if analysis_type == "4-Factors Net Points":
+                # --- 4F NET POINTS LOGIC ---
                 lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
                 t_off_raw = calc_raw_factors(t_off, lg_data['drb'], lg_effic, lg_orb_pct)
                 t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
+                
                 off_i = {k: (t_off_raw[k] - lg_raw[k]) for k in lg_raw}
                 def_i = {k: (lg_raw[k] - t_def_raw[k]) for k in lg_raw}
                 net_i = {k: off_i[k] + def_i[k] for k in lg_raw}
-                disp = off_i if view_type == "Offensive Impact" else (def_i if view_type == "Defensive Impact" else net_i)
                 
-                league_results.append({
-                    "Team_Logo": get_team_icon(team), "Team": team, 
+                disp = off_i if view_type == "Offensive Impact" else (def_i if view_type == "Defensive Impact" else net_i)
+                entry.update({
                     "Shooting": disp['Shooting'], "Turnovers": disp['Turnovers'],
                     "Rebounding": disp['Rebounding'], "Free Throws": disp['Free Throws'],
                     "Net Points": sum(disp.values())
                 })
             else:
-                # Situational Standings
-                p = get_4f_percentages(t_off, t_def)
-                league_results.append({
-                    "Team_Logo": get_team_icon(team), "Team": team,
-                    "Pts off TO": t_off['pts_off_to'],
-                    "2nd Chance": t_off['pts_2nd_ch'],
-                    "Fast Break": t_off['pts_fb'],
-                    "eFG%": p["eFG%"], "TO%": p["TO%"], "ORB%": p["ORB%"],
-                    "FTR": p["FTR"] # ADDED FTR
-                })
+                # --- CLASSIC 4F / SITUATIONAL LOGIC ---
+                p_off = get_4f_percentages(t_off, t_def)
+                p_def = get_4f_percentages(t_def, t_off)
+
+                if view_type == "Offensive Impact":
+                    entry.update({"Pts off TO": t_off['pts_off_to'], "2nd Chance": t_off['pts_2nd_ch'], "Fast Break": t_off['pts_fb']})
+                    entry.update(p_off)
+                elif view_type == "Defensive Impact":
+                    entry.update({"Pts off TO": t_def['pts_off_to'], "2nd Chance": t_def['pts_2nd_ch'], "Fast Break": t_def['pts_fb']})
+                    entry.update(p_def)
+                else: # Net Impact
+                    entry.update({
+                        "Pts off TO": t_off['pts_off_to'] - t_def['pts_off_to'],
+                        "2nd Chance": t_off['pts_2nd_ch'] - t_def['pts_2nd_ch'],
+                        "Fast Break": t_off['pts_fb'] - t_def['pts_fb']
+                    })
+                    p_net = {k: p_off[k] - p_def[k] for k in p_off}
+                    entry.update(p_net)
+                
+            league_results.append(entry)
             
     if not league_results:
         st.error(f"No data found for {selected_phase}")
     else:
-        sort_col = "Net Points" if analysis_type == "4-Factors Net Points" else "Pts off TO"
-        standings_df = pd.DataFrame(league_results).sort_values(sort_col, ascending=False)
+        standings_df = pd.DataFrame(league_results)
+        
+        # 1. Determine Sort and Formatting
+        if analysis_type == "4-Factors Net Points":
+            sort_col = "Net Points"
+            format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]}
+            grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]
+            cols_visible = ["Rank", "Team_Logo", "Team", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]
+        else:
+            cols_visible = ["Rank", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+            sort_col = "eFG%" if view_type != "Net Impact" else "Pts off TO"
+            if view_type == "Net Impact":
+                format_dict = {k: "{:+.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+                format_dict.update({k: "{:+.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+                format_dict["FTR"] = "{:+.3f}"
+            else:
+                format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+                format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+                format_dict["FTR"] = "{:.3f}"
+
+        # 1. Calculate Ranking (Internal)
+        # We sort by the performance metric to assign the "Rank" number
+        standings_df = standings_df.sort_values(sort_col, ascending=False)
         standings_df.insert(0, "Rank", range(1, len(standings_df) + 1))
 
-        # Determine which columns get the gradient
+        # 2. STABLE VIEW: Re-sort alphabetically by Team for the initial render
+        # This prevents the table from jumping when metrics change
+        standings_df = standings_df.sort_values("Team", ascending=True)
+
+        # 3. Initialize Styler
+        styler = standings_df.style.format(format_dict)
+
+        # 2. Initialize Styler
+        styler = standings_df.style.format(format_dict)
+
+        # 3. Apply Conditional Gradients
         if analysis_type == "4-Factors Net Points":
-            grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]
-            format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]}
+            # Always symmetrical around 0
+            styler = styler.background_gradient(subset=grad_cols, cmap=custom_rdwgn, vmin=-10, vmax=10)
         else:
-            grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-            format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break","eFG%", "TO%", "ORB%", "FTR"]}
+            if view_type == "Net Impact":
+                # Symmetrical around 0 for Differences
+                styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_rdwgn, vmin=-10, vmax=10)
+                styler = styler.background_gradient(subset=['eFG%', 'ORB%', 'FTR'], cmap=custom_rdwgn, vmin=-0.08, vmax=0.08)
+                styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=-0.04, vmax=0.04)
+            else:
+                # --- DYNAMIC MIDPOINTS FROM TABLE DATA ---
+                # This ensures the colors are balanced based on the teams shown
+                tbl_efg = standings_df['eFG%'].mean()
+                tbl_to = standings_df['TO%'].mean()
+                tbl_orb = standings_df['ORB%'].mean()
+                tbl_ftr = standings_df['FTR'].mean()
+                
+                # Volumes: White to Green
+                styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wgn, vmin=5, vmax=20)
+                
+                # Percentages: Balanced around the current group's mean
+                # Tightened ranges (0.05-0.08) because season averages vary less than single games
+                styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=tbl_efg-0.05, vmax=tbl_efg+0.05)
+                styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=tbl_orb-0.08, vmax=tbl_orb+0.08)
+                styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=tbl_ftr-0.08, vmax=tbl_ftr+0.08)
+                styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=tbl_to-0.03, vmax=tbl_to+0.03)
 
-        # 1. Initialize Styler
-    styler = standings_df.style.format(format_dict)
-
-    # 2. Apply Conditional Gradients
-    if analysis_type == "4-Factors Net Points":
-        # Symmetrical around 0 for Net Points
-        styler = styler.background_gradient(subset=['Shooting', 'Turnovers', 'Rebounding', 'Free Throws', 'Net Points'], cmap=custom_rdwgn, vmin=-10, vmax=10)
-    else:
-        # Situational Gradients
-        styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wgn, vmin=5, vmax=20)
-        styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=avg_efg-0.06, vmax=avg_efg+0.06)
-        styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=avg_orb-0.10, vmax=avg_orb+0.10)
-        styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=avg_to-0.04, vmax=avg_to+0.04)
-        styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=avg_ftr-0.10, vmax=avg_ftr+0.10)
-
-    # 3. Render
-    st.dataframe(
-        styler,
-        use_container_width=True, height=600, hide_index=True,
-        column_config={
-            "Team_Logo": st.column_config.ImageColumn(" ", width="small"),
-            "Rank": st.column_config.NumberColumn("Pos", width="small")
-        }
-    )
-    st.download_button(
-    "Download Standings PDF", 
-    generate_standings_pdf(standings_df, league, season, selected_phase, analysis_type), 
-    f"Standings_{selected_phase}.pdf"
-)
-
+        # 4. Render Table
+        st.dataframe(
+            styler,
+            use_container_width=True, height=600, hide_index=True,
+            column_order=cols_visible,
+            column_config={
+                "Team_Logo": st.column_config.ImageColumn(" ", width="small"),
+                "Rank": st.column_config.NumberColumn("Pos", width="small")
+            }
+        )
+        st.download_button("Download Standings PDF", generate_standings_pdf(standings_df, league, season, selected_phase, analysis_type), f"Standings_{selected_phase}.pdf")
     st.stop()
 else: # Game Boxscore mode
     df_f = df_league[df_league['season'] == season].copy()
@@ -1446,17 +1548,20 @@ if analysis_type == "4-Factors Net Points":
             for f in factors: 
                 st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
 
-    # --- MASTER PDF EXPORT (Season Agg & Game Boxscore) ---
+# --- MASTER PDF EXPORT SECTION ---
 if mode in ["Season Aggregates per Team", "Games Boxscores"]:
     st.markdown("---")
     if st.button("Generate PDF Report", key="master_pdf_btn"):
         # 1. Determine Source Stats
-        s1 = g['t1_stats'] if mode == "Games Boxscores" else t1_off
-        s2 = g['t2_stats'] if mode == "Games Boxscores" else t2_off
+        if mode == "Games Boxscores":
+            s1 = g['t1_stats']
+            s2 = g['t2_stats']
+        else:
+            s1 = t1_off
+            s2 = t2_off
         
         # 2. Prepare Data based on Analysis Type
         if analysis_type == "4-Factors Net Points":
-            # Uses your existing MPL function
             chart_buf = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
             table_rows = [
                 ("Shooting Net", f"{i1_tot['Shooting']:+.2f}", f"{i2_tot['Shooting']:+.2f}"),
@@ -1465,17 +1570,20 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"]:
                 ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}")
             ]
         else:
-            # Uses the new situational MPL function
             chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2)
+            # Calculate percentages for the table
             p1 = get_4f_percentages(s1, s2)
             p2 = get_4f_percentages(s2, s1)
+            
+            # Format rows with proper % and 2 decimal signs
             table_rows = [
-                ("Pts off TO", f"{s1['pts_off_to']:.1f}", f"{s2['pts_off_to']:.1f}"),
-                ("2nd Chance", f"{s1['pts_2nd_ch']:.1f}", f"{s2['pts_2nd_ch']:.1f}"),
-                ("Fast Break", f"{s1['pts_fb']:.1f}", f"{s2['pts_fb']:.1f}"),
-                ("eFG%", p1['eFG%'], p2['eFG%']),
-                ("TO%", p1['TO%'], p2['TO%']),
-                ("ORB%", p1['ORB%'], p2['ORB%'])
+                ("Pts off TO", f"{s1['pts_off_to']:.2f}", f"{s2['pts_off_to']:.2f}"),
+                ("2nd Chance", f"{s1['pts_2nd_ch']:.2f}", f"{s2['pts_2nd_ch']:.2f}"),
+                ("Fast Break", f"{s1['pts_fb']:.2f}", f"{s2['pts_fb']:.2f}"),
+                ("eFG%", f"{p1['eFG%']:.1%}", f"{p2['eFG%']:.1%}"),
+                ("TO%", f"{p1['TO%']:.1%}", f"{p2['TO%']:.1%}"),
+                ("ORB%", f"{p1['ORB%']:.1%}", f"{p2['ORB%']:.1%}"),
+                ("FTR", f"{p1['FTR']:.2f}", f"{p2['FTR']:.2f}")
             ]
 
         # 3. Generate and Show Download
