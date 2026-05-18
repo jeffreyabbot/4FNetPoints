@@ -10,6 +10,7 @@ from fpdf.enums import XPos, YPos
 import matplotlib.pyplot as plt
 import io
 import base64
+import unicodedata
 #python -m streamlit run app.py   (para hacerlo funcionar)
 # --- CONFIGURATION ---
 DATA_BASE_PATH = "informes_data"
@@ -46,14 +47,19 @@ def clean_num(val):
 
 # --- HELPERS ---
 @st.cache_resource # This makes the search instant after the first time
-def get_logo_filename_map():
-    """Creates a dictionary mapping UPPERCASE team names to actual filenames on disk."""
+def get_logo_filename_map(version=1): # Change this number to force a re-scan
     folder_path = os.path.join(LOGOS_PATH, "teams")
     if not os.path.exists(folder_path):
         return {}
     
-    # Builds a map like: {"REAL MADRID": "real madrid.png", "BARÇA": "Barça.png"}
-    return {f.upper().replace(".PNG", ""): f for f in os.listdir(folder_path) if f.lower().endswith(".png")}
+    mapping = {}
+    for f in os.listdir(folder_path):
+        if f.lower().endswith(".png"):
+            name_part = os.path.splitext(f)[0]
+            team_key = normalize_str(name_part)
+            mapping[team_key] = f
+    return mapping
+
 def generate_aggregate_pdf(t1, t2, season, t1_stats, t2_stats, analysis_type):
     pdf = FPDF()
     pdf.add_page()
@@ -81,29 +87,79 @@ def generate_aggregate_pdf(t1, t2, season, t1_stats, t2_stats, analysis_type):
             pdf.ln()
             
     return bytes(pdf.output(dest='S'))
+def normalize_str(text):
+    if not text: return ""
+    import unicodedata
+    import re
+    # 1. Basic cleaning
+    s = str(text).strip().upper()
+    
+    # 2. Handle all types of apostrophes specifically
+    # Replace straight ('), curly (’), and backtick (`) with a space
+    s = s.replace("'", " ").replace("’", " ").replace("`", " ")
+    
+    # 3. Remove accents (SANDÁ -> SANDA)
+    s = unicodedata.normalize('NFKD', s).encode('ascii', 'ignore').decode('utf-8')
+    
+    # 4. Remove dots and everything that isn't a letter or a number
+    s = re.sub(r'[^A-Z0-9 ]', ' ', s)
+    
+    # 5. Collapse multiple spaces into one
+    s = re.sub(r'\s+', ' ', s).strip()
+    return s
+
+@st.cache_resource
+def get_logo_filename_map(last_mod_time):
+    """Creates a dictionary mapping NORMALIZED team names to actual filenames.
+    Supports PNG and JPG/JPEG.
+    """
+    folder_path = os.path.join(LOGOS_PATH, "teams")
+    if not os.path.exists(folder_path):
+        return {}
+    
+    mapping = {}
+    valid_extensions = (".png", ".jpg", ".jpeg")
+    
+    for f in os.listdir(folder_path):
+        if f.lower().endswith(valid_extensions):
+            # Get name without any extension
+            name_part = os.path.splitext(f)[0]
+            team_key = normalize_str(name_part)
+            mapping[team_key] = f
+    return mapping
 def get_team_icon(team_name):
-    """Finds the logo file regardless of casing and converts to Base64."""
+    """Finds logo using normalized matching supporting multiple formats."""
     if not team_name:
         return None
         
-    search_name = str(team_name).strip().upper()
-    logo_map = get_logo_filename_map()
+    folder_path = os.path.join(LOGOS_PATH, "teams")
+    mtime = os.path.getmtime(folder_path) if os.path.exists(folder_path) else 0
+    logo_map = get_logo_filename_map(mtime)
     
-    # 1. Look for the actual filename in our map
+    search_name = normalize_str(team_name)
     actual_filename = logo_map.get(search_name)
+    
+    # Fuzzy Fallback (Matches "CB VIC" to "CB VIC - UCAMPUS")
+    if not actual_filename:
+        for key, filename in logo_map.items():
+            if key in search_name or search_name in key:
+                actual_filename = filename
+                break
     
     if actual_filename:
         os_path = os.path.join(LOGOS_PATH, "teams", actual_filename)
+        # Detect extension for Base64 header
+        ext = os.path.splitext(actual_filename)[1].lower().replace(".", "")
+        mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
     else:
-        # Fallback if no match found
         os_path = os.path.join(LOGOS_PATH, "FEB.png")
+        mime_type = "image/png"
         
-    # 2. Convert to Base64 for the browser
     if os.path.exists(os_path):
         try:
             with open(os_path, "rb") as f:
                 data = base64.b64encode(f.read()).decode("utf-8")
-                return f"data:image/png;base64,{data}"
+                return f"data:{mime_type};base64,{data}"
         except Exception:
             return None
     return None
@@ -1042,7 +1098,8 @@ with st.sidebar.expander("Glossary", expanded=False):
         "**Fast Break Points:** Points scored by a player on a fast break (after a Fast Break Opportunity). Includes points from FTs after a foul.\n\n"
     "**Fast Break Opportunity:** When a player scores a FG or is fouled on a fast break. A fast break is a play within 8 seconds of a DRB, STL, or opponent's made basket."
 )
-    # --- 1. HOME / LANDING PAGE ---
+
+# --- 1. HOME / LANDING PAGE ---
 if mode == "Home":
     st.markdown(f"""
         <div style="text-align: center; padding: 40px 0px;">
@@ -1119,7 +1176,13 @@ elif mode == "Team Performance by Game":
         st.stop()
         
     target_team = st.sidebar.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
+     # 1. PREPARE THE RIVAL LIST (Needed for the filter)
+    df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
+                        ((df_league['t1'] == target_team) | (df_league['t2'] == target_team))].copy()
     
+    all_opponents = sorted(list(set(df_team['t1'].unique()) | set(df_team['t2'].unique())))
+    if target_team in all_opponents:
+        all_opponents.remove(target_team)
     # --- RESET LOGIC ---
     current_context = f"{league}_{season}_{sel_phase}_{target_team}"
     if st.session_state.get("last_context") != current_context:
@@ -1139,14 +1202,32 @@ elif mode == "Team Performance by Game":
     df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
 
     all_rnds = sorted(df_team['round'].unique())
+    # 1. Identify all rivals (Do this first so the list is ready for the widget)
+    all_opponents = sorted(list(set(df_team['t1'].unique()) | set(df_team['t2'].unique())))
+    if target_team in all_opponents:
+        all_opponents.remove(target_team)
+
+    # 2. SIDEBAR FILTERS (Define these only ONCE)
     res_choice = st.sidebar.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
     venue_choice = st.sidebar.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
+    rival_choice = st.sidebar.multiselect("Filter by Rivals", all_opponents, default=all_opponents, key="perf_rival_choice")
+    
+    all_rnds = sorted(df_team['round'].unique())
     range_rnds = st.sidebar.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
 
+    # 3. FILTERING LOGIC
+    df_team['opponent'] = df_team.apply(lambda x: x['t2'] if x['t1'] == target_team else x['t1'], axis=1)
     allowed_wins = [True if r == "Win" else False for r in res_choice]
-    start_idx = all_rnds.index(range_rnds[0]); end_idx = all_rnds.index(range_rnds[1])
+    start_idx = all_rnds.index(range_rnds[0])
+    end_idx = all_rnds.index(range_rnds[1])
     allowed_range = all_rnds[start_idx : end_idx+1]
-    df_filtered = df_team[(df_team['is_win'].isin(allowed_wins)) & (df_team['venue'].isin(venue_choice)) & (df_team['round'].isin(allowed_range))]
+
+    df_filtered = df_team[
+        (df_team['is_win'].isin(allowed_wins)) & 
+        (df_team['venue'].isin(venue_choice)) & 
+        (df_team['round'].isin(allowed_range)) &
+        (df_team['opponent'].isin(rival_choice))
+    ]
 
     if df_filtered.empty:
         st.error("No games match this filter combination.")
@@ -1213,7 +1294,30 @@ elif mode == "Team Performance by Game":
         performance_data.append(entry)
 
     perf_df = pd.DataFrame(performance_data)
-
+# --- RESTORED PERFORMANCE HEADER ---
+    st.markdown("---")
+    perf_header_col1, perf_header_col2 = st.columns([1, 5])
+    
+    with perf_header_col1:
+        team_logo = get_team_icon(target_team)
+        if team_logo:
+            st.image(team_logo, width=120)
+            
+    with perf_header_col2:
+        st.title(f"Scouting Report: {target_team}")
+        st.markdown(f"### {analysis_type}")
+        st.markdown(f"**{sel_phase}** | {view_type}")
+        
+        filter_text = f"**Results:** {', '.join(res_choice)} | **Venue:** {', '.join(venue_choice)}"
+        # Safety check: ensure rival_choice and all_opponents are defined
+        if 'rival_choice' in locals() and 'all_opponents' in locals():
+            if len(rival_choice) < len(all_opponents):
+                filter_text += f" | **Rivals:** Custom Filter"
+            else:
+                filter_text += f" | **Rivals:** All"
+            
+        st.caption(f"Season: {season} | {filter_text}")
+    st.markdown("---")
     # --- TOP METRICS HEADER ---
     c_s, c_r, c_t, c_f = st.columns(4)
     if analysis_type == "4-Factors Net Points":
