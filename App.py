@@ -489,7 +489,7 @@ def get_4f_percentages(stats, opp_stats=None):
     fgm = stats['f2m'] + stats['f3m']
     efg = (fgm + 0.5 * stats['f3m']) / fga if fga > 0 else 0
     tov_pct = stats['tov'] / (fga + 0.44 * stats['fta'] + stats['tov']) if (fga + 0.44 * stats['fta'] + stats['tov']) > 0 else 0
-    ft_rate = stats['fta'] / fga if fga > 0 else 0
+    ft_rate = stats['ftm'] / fga if fga > 0 else 0
     orb_pct = 0
     if opp_stats:
         denom = stats['orb'] + opp_stats['drb']
