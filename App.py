@@ -939,23 +939,28 @@ st.markdown("""
             padding: 8px !important;
             border-radius: 8px !important;
         }
-        /* 11. FIX EXPANDER HOVER (Glossary) */
-        [data-testid="stSidebar"] details summary:hover {
-            background-color: #2d324a !important; /* Same as your selectbox background */
-            border-radius: 4px;
-        }
-        
-        [data-testid="stSidebar"] details summary:hover * {
-            color: #ffffff !important; /* Force text to stay white */
+        /* 11. FIX EXPANDER HOVER (Deployed Version) */
+        /* Targets the summary header specifically in the sidebar */
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+            background-color: #2d324a !important;
+            color: #ffffff !important;
         }
 
-        /* Ensure the expander icon (chevron) also stays white */
-        [data-testid="stSidebar"] details summary svg {
+        /* Targets any text inside the header (like the label) on hover */
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p,
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover span,
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover div {
+            color: #ffffff !important;
+        }
+
+        /* Fix for the chevron icon turning white/disappearing on hover */
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover svg {
             fill: #ffffff !important;
         }
-        [data-testid="stSidebar"] hr {
-            margin: 0.8rem 0 !important;
-            border-top: 1px solid #3f445e !important;
+
+        /* Prevent the background from changing when the expander is actually open */
+        [data-testid="stSidebar"] [data-testid="stExpander"] details[open] summary {
+            background-color: transparent !important;
         }
     </style>
 """, unsafe_allow_html=True)
