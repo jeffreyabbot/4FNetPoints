@@ -193,35 +193,33 @@ def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
     buf.seek(0)
     return buf
 
-def create_pdf_situational_mpl(s1, s2, t1, t2):
+def create_pdf_situational_mpl(s1, s2, t1, t2, lg_stats):
     labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
     vals_t1 = [s1.get("pts_off_to", 0), s1.get("pts_2nd_ch", 0), s1.get("pts_fb", 0)]
     vals_t2 = [s2.get("pts_off_to", 0), s2.get("pts_2nd_ch", 0), s2.get("pts_fb", 0)]
+    avg_vals = [lg_stats.get("pts_off_to", 0), lg_stats.get("pts_2nd_ch", 0), lg_stats.get("pts_fb", 0)]
     
     fig, ax = plt.subplots(figsize=(10, 4))
     y = range(len(labels))
     width = 0.35
     
-    # UPDATED COLORS: Dark Blue (#1e2130) and Red (#F00000)
-    bar1 = ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#1e2130')
-    bar2 = ax.barh([i - width/2 for i in y], vals_t2, width, label=t2, color='#F00000')
+    ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#1e2130')
+    ax.barh([i - width/2 for i in y], vals_t2, width, label=t2, color='#F00000')
     
-    ax.bar_label(bar1, fmt='%.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
-    ax.bar_label(bar2, fmt='%.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
+    # Add dashed average lines
+    for i, avg in enumerate(avg_vals):
+        ax.vlines(x=avg, ymin=i-0.4, ymax=i+0.4, color='gray', linestyle='--', linewidth=1.5, label='Lg. Avg' if i==0 else "")
     
     ax.set_yticks(y)
     ax.set_yticklabels(labels)
     ax.invert_yaxis()
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=2, frameon=False)
+    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3, frameon=False)
     
     buf = io.BytesIO()
     plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
     plt.close(fig)
     buf.seek(0)
     return buf
-
 def generate_unified_report(chart_buf, t1, t2, analysis_type, subtitle, table_data=None):
     pdf = FPDF()
     pdf.add_page()
@@ -722,7 +720,7 @@ def get_league_benchmarks(league, season): # Added season param
             for f in filenames:
                 if f.startswith('AGGREGATE_'): 
                     all_aggregate_files.append(os.path.join(root, f))
-    total_stats = {"pts": 0, "poss": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, "orb": 0, "drb": 0, "tov": 0, "gp": 0}
+    total_stats = {"pts": 0, "poss": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, "orb": 0, "drb": 0, "tov": 0, "gp": 0,"pts_off_to": 0, "pts_2nd_ch": 0, "pts_fb": 0}
     for f in all_aggregate_files:
         try:
             df = pd.read_excel(f, header=None)
@@ -732,7 +730,11 @@ def get_league_benchmarks(league, season): # Added season param
             total_stats["f3m"] += clean_num(row_t[5]); total_stats["f3a"] += clean_num(row_t[6])
             total_stats["ftm"] += clean_num(row_t[7]); total_stats["fta"] += clean_num(row_t[8])
             total_stats["drb"] += clean_num(row_t[10]); total_stats["orb"] += clean_num(row_t[11])
-            total_stats["tov"] += clean_num(row_t[15]); total_stats["poss"] += clean_num(df.iloc[1][2]) 
+            total_stats["tov"] += clean_num(row_t[15]); total_stats["poss"] += clean_num(df.iloc[1][2])
+            # EXTRACT SITUATIONAL DATA (Using Aggregate Indices: 22, 23, 24)
+            total_stats["pts_off_to"] += clean_num(row_t[20])
+            total_stats["pts_2nd_ch"] += clean_num(row_t[21])
+            total_stats["pts_fb"] += clean_num(row_t[22]) 
         except: continue
     lg_effic = total_stats["pts"] / total_stats["poss"] if total_stats["poss"] > 0 else 1.13
     lg_orb_pct = total_stats["orb"] / (total_stats["orb"] + total_stats["drb"]) if (total_stats["orb"] + total_stats["drb"]) > 0 else 0.30
@@ -788,38 +790,43 @@ def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
     return fig
 from fpdf.enums import XPos, YPos
 
-from fpdf.enums import XPos, YPos
-
-from fpdf.enums import XPos, YPos
-def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name):
-    # Labels for the chart
+def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
     labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
-    
-    # Values
     vals_t1 = [t1_stats.get("pts_off_to", 0), t1_stats.get("pts_2nd_ch", 0), t1_stats.get("pts_fb", 0)]
     vals_t2 = [t2_stats.get("pts_off_to", 0), t2_stats.get("pts_2nd_ch", 0), t2_stats.get("pts_fb", 0)]
     
+    # Get Averages from lg_stats
+    avg_vals = [lg_stats.get("pts_off_to", 0), lg_stats.get("pts_2nd_ch", 0), lg_stats.get("pts_fb", 0)]
+    
     fig = go.Figure()
+    fig.add_trace(go.Bar(y=labels, x=vals_t1, orientation='h', name=t1_name, marker_color='#1e2130', text=[f"{v:.1f}" for v in vals_t1], textposition='auto'))
+    fig.add_trace(go.Bar(y=labels, x=vals_t2, orientation='h', name=t2_name, marker_color="#F00000", text=[f"{v:.1f}" for v in vals_t2], textposition='auto'))
     
-    # Team 1 Bars
-    fig.add_trace(go.Bar(
-        y=labels, x=vals_t1, orientation='h', name=t1_name,
-        marker_color='#1e2130', text=[f"{v:.1f}" for v in vals_t1],
-        textposition='auto'
-    ))
-    
-    # Team 2 Bars
-    fig.add_trace(go.Bar(
-        y=labels, x=vals_t2, orientation='h', name=t2_name,
-        marker_color="#F00000", text=[f"{v:.1f}" for v in vals_t2],
-        textposition='auto'
-    ))
-    
+    # Add League Average Reference Lines
+    for i, avg in enumerate(avg_vals):
+        fig.add_shape(type="line", x0=avg, x1=avg, y0=i-0.4, y1=i+0.4,
+                      line=dict(color="Gray", width=2, dash="dash"))
+
+    # --- NEW: ADD TEXT LABEL FOR THE LINE ---
+    # We place it above the top category (index 2: Fast Break Pts)
+    fig.add_annotation(
+        x=avg_vals[2], # Aligned with the top dashed line (Fast Break)
+        y=1,           # Top of the plot area
+        yref="paper",  # Use paper coordinates for vertical positioning
+        text="Lg. Avg",
+        showarrow=False,
+        yshift=15,     # Move it 15 pixels above the top grid line
+        font=dict(color="Gray", size=11, family="Arial"),
+        bgcolor="rgba(255, 255, 255, 0.8)" # Adds a slight white glow so it's readable if it hits a bar
+    )
+
+    # Legend entry for the dashed line
+    fig.add_trace(go.Scatter(x=[None], y=[None], mode='lines', 
+                             line=dict(color='Gray', width=2, dash='dash'), name='League Avg'))
+
     fig.update_layout(
-        barmode='group', height=350,
-        margin=dict(l=120, r=40, t=20, b=40),
-        plot_bgcolor='white',
-        xaxis=dict(title="Average Points per Game", showgrid=True, gridcolor='#E5E7E9'),
+        barmode='group', height=350, margin=dict(l=120, r=40, t=20, b=40),
+        plot_bgcolor='white', xaxis=dict(title="Points per Game", showgrid=True, gridcolor='#E5E7E9'),
         legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
     )
     return fig
@@ -1206,7 +1213,10 @@ elif mode == "Team Performance by Game":
     all_opponents = sorted(list(set(df_team['t1'].unique()) | set(df_team['t2'].unique())))
     if target_team in all_opponents:
         all_opponents.remove(target_team)
-
+    # DEFINE A UNIQUE CONTEXT KEY ---
+    # This key changes whenever the League, Season, Phase, or Team changes
+    # This forces Streamlit to reset the filters automatically
+    ctx_key = f"{league}_{season}_{sel_phase}_{target_team}"
     # 2. SIDEBAR FILTERS (Define these only ONCE)
     res_choice = st.sidebar.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
     venue_choice = st.sidebar.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
@@ -1642,16 +1652,16 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"]:
             )
         else:
             # Safe assignment inside the display block
-            if mode == "Game Boxscore":
+            if mode == "Games Boxscores":
                 s1, s2 = g['t1_stats'], g['t2_stats']
             else:
                 s1, s2 = t1_off, t2_off
                 
             st.plotly_chart(
-                plot_situational_comparison(s1, s2, t1, t2), 
+                plot_situational_comparison(s1, s2, t1, t2, lg_data), # Added lg_data
                 use_container_width=True, 
                 key=f"chart_sit_{t1}_{t2}"
-            )
+)
             
             st.markdown("### Four Factors (%) Comparison")
             p1 = get_4f_percentages(s1, s2)
@@ -1734,7 +1744,7 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"]:
                 ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}")
             ]
         else:
-            chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2)
+            chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2, lg_data) # Added lg_data
             # Calculate percentages for the table
             p1 = get_4f_percentages(s1, s2)
             p2 = get_4f_percentages(s2, s1)
