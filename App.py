@@ -990,7 +990,7 @@ if st.sidebar.button("Refresh Data Index"):
     # 3. Rerun
     st.rerun()
 
-mode = st.sidebar.radio("View Mode", ["Season Aggregates per Team", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], key="mode_radio")
+mode = st.sidebar.radio("View Mode", ["Home","Season Aggregates per Team", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], key="mode_radio")
 analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points", "4-Factors Classic "], key="analysis_type")
 # 2. NEW: Select Season (Now global, so both modes use it)
 df_league = df_index[df_index['league'] == league]
@@ -1042,6 +1042,50 @@ with st.sidebar.expander("Glossary", expanded=False):
         "**Fast Break Points:** Points scored by a player on a fast break (after a Fast Break Opportunity). Includes points from FTs after a foul.\n\n"
     "**Fast Break Opportunity:** When a player scores a FG or is fouled on a fast break. A fast break is a play within 8 seconds of a DRB, STL, or opponent's made basket."
 )
+    # --- 1. HOME / LANDING PAGE ---
+if mode == "Home":
+    st.markdown(f"""
+        <div style="text-align: center; padding: 40px 0px;">
+            <h1 style="font-size: 3.5rem; margin-bottom: 10px;">Basketball 4-Factors Scouting</h1>
+            <p style="font-size: 1.2rem; color: #666;">Advanced Analytics & Situational Performance Tool</p>
+        </div>
+    """, unsafe_allow_html=True)
+
+    # Centered Logo
+    col_l1, col_l2, col_l3 = st.columns([1, 2, 1])
+    with col_l2:
+        config = LEAGUE_CONFIG.get(league, {})
+        logo_filename = config.get("logo", "FEB.png")
+        logo_path = os.path.join(LOGOS_PATH, logo_filename)
+        if os.path.exists(logo_path):
+            # REMOVE use_container_width=True and use a fixed width (e.g., 250)
+            # You can also use st.markdown with HTML for even more control
+            st.markdown(
+                f'<div style="display: flex; justify-content: center;"><img src="data:image/png;base64,{base64.b64encode(open(logo_path, "rb").read()).decode()}" width="250"></div>', 
+                unsafe_allow_html=True
+            )
+    
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown("### Get Started")
+        st.info("""
+        1. **Select a League** and **Season** in the sidebar.
+        2. **Choose a View Mode**:
+            * **Season Aggregate**: Compare two teams' season-long profiles.
+            * **Game Boxscore**: Deep dive into a specific past game.
+            * **Team Performance**: Track a team's trends round-by-round.
+            * **League Standings**: See the full league heatmap.
+        """)
+        
+    with c2:
+        st.markdown("### Analysis Categories")
+        st.success("""
+        * **4-Factors Net Points**: Measures the impact of Shooting, Turnovers, Rebounding, and FTs in terms of point difference relative to average.
+        * **Situational Points**: Traditional 4-Factor percentages (eFG%, TO%, etc.) and situational scoring (Fast Break, 2nd Chance).
+        """)
+
+    # Stop execution here so the Matchup/Display logic doesn't run
+    st.stop()
 if mode == "Season Aggregates per Team":
     # Filter teams based on the chosen season
     teams = get_teams_in_league(league, season)
@@ -1456,51 +1500,62 @@ else: # Game Boxscore mode
     label = "4-Factors" if analysis_type == "4-Factors Net Points" else "4-Factors Classic"
     header_title = f"{label} Impact: {game_record['round']} - {t1} ({game_record['pts1']}) vs {t2} ({game_record['pts2']})"
 # --- DISPLAY ---
-# 1. Get icons
-t1_icon = get_team_icon(t1)
-t2_icon = get_team_icon(t2)
+# Ensure we only try to render this if we are in a mode that defines matchup variables
+if mode in ["Season Aggregates per Team", "Games Boxscores"]:
+    # 1. Get icons (Indented 4 spaces)
+    t1_icon = get_team_icon(t1)
+    t2_icon = get_team_icon(t2)
 
-# 2. Build icon HTML
-icon1_img = f'<img src="{t1_icon}" style="max-height: 80px; width: auto;">' if t1_icon else ""
-icon2_img = f'<img src="{t2_icon}" style="max-height: 80px; width: auto;">' if t2_icon else ""
+    # 2. Build icon HTML (Indented 4 spaces)
+    icon1_img = f'<img src="{t1_icon}" style="max-height: 80px; width: auto;">' if t1_icon else ""
+    icon2_img = f'<img src="{t2_icon}" style="max-height: 80px; width: auto;">' if t2_icon else ""
 
-# 3. Header
-header_html = f"""
-<div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 10px;">
-    <div style="flex: 1; text-align: left; min-width: 100px;">{icon1_img}</div>
-    <div style="flex: 3; text-align: center;">
-        <h1 style="margin: 0; font-size: 2.2rem; line-height: 1.2;">{header_title}</h1>
-        <p style="margin: 5px 0 0 0; color: #666; font-size: 1.1rem; letter-spacing: 1px;">
-            {league.upper()} <span style="color: #ccc; margin: 0 10px;">|</span> {season}
-        </p>
+    # 3. Header string (Indented 4 spaces)
+    header_html = f"""
+    <div style="display: flex; align-items: center; justify-content: space-between; width: 100%; margin-bottom: 10px;">
+        <div style="flex: 1; text-align: left; min-width: 100px;">{icon1_img}</div>
+        <div style="flex: 3; text-align: center;">
+            <h1 style="margin: 0; font-size: 2.2rem; line-height: 1.2;">{header_title}</h1>
+            <p style="margin: 5px 0 0 0; color: #666; font-size: 1.1rem; letter-spacing: 1px;">
+                {league.upper()} <span style="color: #ccc; margin: 0 10px;">|</span> {season}
+            </p>
+        </div>
+        <div style="flex: 1; text-align: right; min-width: 100px;">{icon2_img}</div>
     </div>
-    <div style="flex: 1; text-align: right; min-width: 100px;">{icon2_img}</div>
-</div>
-<hr style="margin-top: 5px; margin-bottom: 25px; border: 0; border-top: 1px solid #eee;">
-"""
-st.markdown(header_html, unsafe_allow_html=True)
+    <hr style="margin-top: 5px; margin-bottom: 25px; border: 0; border-top: 1px solid #eee;">
+    """
+    
+    # 4. Display Markdown (Aligned with header_html above)
+    st.markdown(header_html, unsafe_allow_html=True)
 
-
-with st.container(border=True):
-    if analysis_type == "4-Factors Net Points":
-        st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True)
-    else:
-        # Use the raw stats we extracted in Step 1
-        # For Game Mode, these are in g['t1_stats'] and g['t2_stats']
-        # For Aggregate Mode, these are in t1_off and t2_off
-        s1 = g['t1_stats'] if mode == "Games Boxscores" else t1_off
-        s2 = g['t2_stats'] if mode == "Games Boxscores" else t2_off
-        st.plotly_chart(plot_situational_comparison(s1, s2, t1, t2), use_container_width=True)
-# --- NEW: 4-Factors Percentages Table ---
-        st.markdown("### Four Factors (%) Comparison")
-        p1 = get_4f_percentages(s1, s2)
-        p2 = get_4f_percentages(s2, s1)
-        
-        perc_df = pd.DataFrame([p1, p2], index=[t1, t2])
-        st.table(perc_df)
-# --- GLOSSARY / INTERPRETATION ---
-# All of this is now properly nested inside the IF block
-if analysis_type == "4-Factors Net Points":
+    # 5. Container (Aligned with st.markdown above)
+    with st.container(border=True):
+        if analysis_type == "4-Factors Net Points":
+            st.plotly_chart(
+                plot_4f_comparison(i1_tot, i2_tot, t1, t2), 
+                use_container_width=True, 
+                key=f"chart_4f_{t1}_{t2}"
+            )
+        else:
+            # Safe assignment inside the display block
+            if mode == "Game Boxscore":
+                s1, s2 = g['t1_stats'], g['t2_stats']
+            else:
+                s1, s2 = t1_off, t2_off
+                
+            st.plotly_chart(
+                plot_situational_comparison(s1, s2, t1, t2), 
+                use_container_width=True, 
+                key=f"chart_sit_{t1}_{t2}"
+            )
+            
+            st.markdown("### Four Factors (%) Comparison")
+            p1 = get_4f_percentages(s1, s2)
+            p2 = get_4f_percentages(s2, s1)
+            perc_df = pd.DataFrame([p1, p2], index=[t1, t2])
+            st.table(perc_df)
+# --- GLOSSARY / INTERPRETATION (Also wrap this in the mode check) ---
+if mode in ["Season Aggregates per Team", "Games Boxscores"] and analysis_type == "4-Factors Net Points":
     st.markdown("---")
     st.subheader("Scouting Interpretation")
     factors = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
