@@ -127,33 +127,41 @@ def get_logo_filename_map(last_mod_time):
             team_key = normalize_str(name_part)
             mapping[team_key] = f
     return mapping
-def get_team_icon(team_name):
-    """Finds logo using normalized matching supporting multiple formats."""
+def get_team_icon(team_name, current_league=None):
+    """Finds logo using normalized matching. 
+    If 'League Average', returns the logo for the specific league.
+    """
     if not team_name:
         return None
         
-    folder_path = os.path.join(LOGOS_PATH, "teams")
-    mtime = os.path.getmtime(folder_path) if os.path.exists(folder_path) else 0
-    logo_map = get_logo_filename_map(mtime)
-    
-    search_name = normalize_str(team_name)
-    actual_filename = logo_map.get(search_name)
-    
-    # Fuzzy Fallback (Matches "CB VIC" to "CB VIC - UCAMPUS")
-    if not actual_filename:
-        for key, filename in logo_map.items():
-            if key in search_name or search_name in key:
-                actual_filename = filename
-                break
-    
-    if actual_filename:
-        os_path = os.path.join(LOGOS_PATH, "teams", actual_filename)
-        # Detect extension for Base64 header
-        ext = os.path.splitext(actual_filename)[1].lower().replace(".", "")
-        mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
+    # --- NEW: Handle League Average Case ---
+    if team_name == "League Average" and current_league in LEAGUE_CONFIG:
+        logo_filename = LEAGUE_CONFIG[current_league].get("logo", "FEB.png")
+        os_path = os.path.join(LOGOS_PATH, logo_filename)
+        mime_type = "image/png" # League logos are usually png
     else:
-        os_path = os.path.join(LOGOS_PATH, "FEB.png")
-        mime_type = "image/png"
+        # --- Existing Team Logo Logic ---
+        folder_path = os.path.join(LOGOS_PATH, "teams")
+        mtime = os.path.getmtime(folder_path) if os.path.exists(folder_path) else 0
+        logo_map = get_logo_filename_map(mtime)
+        
+        search_name = normalize_str(team_name)
+        actual_filename = logo_map.get(search_name)
+        
+        # Fuzzy Fallback
+        if not actual_filename:
+            for key, filename in logo_map.items():
+                if key in search_name or search_name in key:
+                    actual_filename = filename
+                    break
+        
+        if actual_filename:
+            os_path = os.path.join(LOGOS_PATH, "teams", actual_filename)
+            ext = os.path.splitext(actual_filename)[1].lower().replace(".", "")
+            mime_type = f"image/{ext if ext != 'jpg' else 'jpeg'}"
+        else:
+            os_path = os.path.join(LOGOS_PATH, "FEB.png")
+            mime_type = "image/png"
         
     if os.path.exists(os_path):
         try:
@@ -1053,7 +1061,11 @@ if st.sidebar.button("Refresh Data Index"):
     # 3. Rerun
     st.rerun()
 
-mode = st.sidebar.radio("View Mode", ["Home","Season Aggregates per Team", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], key="mode_radio")
+mode = st.sidebar.radio(
+    "View Mode", 
+    ["Home", "Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], 
+    key="mode_radio"
+)
 analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points", "4-Factors Classic "], key="analysis_type")
 # 2. NEW: Select Season (Now global, so both modes use it)
 df_league = df_index[df_index['league'] == league]
@@ -1135,7 +1147,8 @@ if mode == "Home":
         st.info("""
         1. **Select a League** and **Season** in the sidebar.
         2. **Choose a View Mode**:
-            * **Season Aggregate**: Compare two teams' season-long profiles.
+            * **Season Aggregate**: Compare a team against the averages in the league.
+            * **Head to Head Matchup**: Directly compare two teams.
             * **Game Boxscore**: Deep dive into a specific past game.
             * **Team Performance**: Track a team's trends round-by-round.
             * **League Standings**: See the full league heatmap.
@@ -1150,27 +1163,54 @@ if mode == "Home":
 
     # Stop execution here so the Matchup/Display logic doesn't run
     st.stop()
+# --- NEW LOGIC FOR TEAM VS LEAGUE ---
 if mode == "Season Aggregates per Team":
-    # Filter teams based on the chosen season
     teams = get_teams_in_league(league, season)
-    t1 = st.sidebar.selectbox("Home Team", teams, index=0, key="t1_sel")
-    t2 = st.sidebar.selectbox("Away Team", teams, index=min(1, len(teams)-1), key="t2_sel")
+    t1 = st.sidebar.selectbox("Select Team", teams, index=0, key="t1_agg")
+    t2 = "League Average" # We name the opponent 'League Average'
     
-    # Get stats specifically for this season
+    # Get stats for the selected team
+    t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
+    t1_def = get_per_game_volumes(t1, league, season, "Rival")
+    
+    # For the 'League Average' team, we use the lg_data we already calculated
+    t2_off = lg_data.copy()
+    t2_def = lg_data.copy()
+    
+    # Calculate impacts (Comparing Team 1 to League, and League to itself which results in 0)
+    lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
+    t1_off_raw = calc_raw_factors(t1_off, lg_data['drb'], lg_effic, lg_orb_pct)
+    t1_def_raw = calc_raw_factors(t1_def, t1_off['drb'], lg_effic, lg_orb_pct)
+    
+    # Team 1 Impact
+    i1_tot = {k: (t1_off_raw[k]-lg_raw[k]) + (lg_raw[k]-t1_def_raw[k]) for k in lg_raw}
+    # League Impact is always 0 because it IS the benchmark
+    i2_tot = {k: 0.0 for k in lg_raw}
+    
+    i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (lg_raw, lg_raw)
+    header_title = f"{season} Team Profile: {t1} vs League Average"
+
+# --- UPDATED LOGIC FOR HEAD TO HEAD ---
+elif mode == "Head to Head Matchup":
+    teams = get_teams_in_league(league, season)
+    t1 = st.sidebar.selectbox("Home Team", teams, index=0, key="t1_h2h")
+    t2 = st.sidebar.selectbox("Away Team", teams, index=min(1, len(teams)-1), key="t2_h2h")
+    
     t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
     t1_def = get_per_game_volumes(t1, league, season, "Rival")
     t2_off = get_per_game_volumes(t2, league, season, "TOTAL")
     t2_def = get_per_game_volumes(t2, league, season, "Rival")
     
     lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
-    t1_off_raw, t1_def_raw = calc_raw_factors(t1_off, lg_data['drb'], lg_effic, lg_orb_pct), calc_raw_factors(t1_def, t1_off['drb'], lg_effic, lg_orb_pct)
-    t2_off_raw, t2_def_raw = calc_raw_factors(t2_off, lg_data['drb'], lg_effic, lg_orb_pct), calc_raw_factors(t2_def, t2_off['drb'], lg_effic, lg_orb_pct)
+    t1_off_raw = calc_raw_factors(t1_off, lg_data['drb'], lg_effic, lg_orb_pct)
+    t1_def_raw = calc_raw_factors(t1_def, t1_off['drb'], lg_effic, lg_orb_pct)
+    t2_off_raw = calc_raw_factors(t2_off, lg_data['drb'], lg_effic, lg_orb_pct)
+    t2_def_raw = calc_raw_factors(t2_def, t2_off['drb'], lg_effic, lg_orb_pct)
     
     i1_tot = {k: (t1_off_raw[k]-lg_raw[k]) + (lg_raw[k]-t1_def_raw[k]) for k in lg_raw}
     i2_tot = {k: (t2_off_raw[k]-lg_raw[k]) + (lg_raw[k]-t2_def_raw[k]) for k in lg_raw}
     i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
-    label = "4-Factors" if analysis_type == "4-Factors Net Points" else "4F-Classic"
-    header_title = f"{season} {label} Aggregate: {t1} vs {t2}"
+    header_title = f"{season} Head to Head: {t1} vs {t2}"
 elif mode == "Team Performance by Game":
     phases_avail = sorted(df_league['phase'].unique())
     sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
@@ -1258,7 +1298,7 @@ elif mode == "Team Performance by Game":
         
         entry = {
             "Round": row['round'],
-            "Opp_Logo": get_team_icon(opp_name),
+            "Opp_Logo": get_team_icon(opp_name, league), # Added 'league'
             "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} {self_score}-{opp_score} vs {opp_name}",
             "Outcome": "W" if row['is_win'] else "L"
         }
@@ -1309,7 +1349,7 @@ elif mode == "Team Performance by Game":
     perf_header_col1, perf_header_col2 = st.columns([1, 5])
     
     with perf_header_col1:
-        team_logo = get_team_icon(target_team)
+        team_logo = get_team_icon(target_team, league) # Added 'league'
         if team_logo:
             st.image(team_logo, width=120)
             
@@ -1452,7 +1492,7 @@ elif mode == "Overall League Standings":
             
             if t_off['pts'] == 0: continue 
 
-            entry = {"Team_Logo": get_team_icon(team), "Team": team}
+            entry = {"Team_Logo": get_team_icon(team, league), "Team": team} # Added 'league'
 
             if analysis_type == "4-Factors Net Points":
                 # --- 4F NET POINTS LOGIC ---
@@ -1615,10 +1655,10 @@ else: # Game Boxscore mode
     header_title = f"{label} Impact: {game_record['round']} - {t1} ({game_record['pts1']}) vs {t2} ({game_record['pts2']})"
 # --- DISPLAY ---
 # Ensure we only try to render this if we are in a mode that defines matchup variables
-if mode in ["Season Aggregates per Team", "Games Boxscores"]:
+if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"]:
     # 1. Get icons (Indented 4 spaces)
-    t1_icon = get_team_icon(t1)
-    t2_icon = get_team_icon(t2)
+    t1_icon = get_team_icon(t1, league) # Added 'league'
+    t2_icon = get_team_icon(t2, league) # Added 'league'
 
     # 2. Build icon HTML (Indented 4 spaces)
     icon1_img = f'<img src="{t1_icon}" style="max-height: 80px; width: auto;">' if t1_icon else ""
@@ -1669,10 +1709,12 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"]:
             perc_df = pd.DataFrame([p1, p2], index=[t1, t2])
             st.table(perc_df)
 # --- GLOSSARY / INTERPRETATION (Also wrap this in the mode check) ---
-if mode in ["Season Aggregates per Team", "Games Boxscores"] and analysis_type == "4-Factors Net Points":
+if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"] and analysis_type == "4-Factors Net Points":
     st.markdown("---")
     st.subheader("Scouting Interpretation")
     factors = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
+    
+    # If comparing against league, we might only want one column or a special label
     c1, c2 = st.columns(2)
 
     with c1:
@@ -1681,22 +1723,32 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"] and analysis_type =
             val = i1_tot[f]
             label = "contribution" if val >= 0 else "cost"
             advantage_text = ""
-            if i1_tot[f] > i2_tot[f]:
-                diff = i1_tot[f] - i2_tot[f]
-                advantage_text = f" ({t1} was {diff:+.2f} pts more efficient)"
+            
+            # Only show "more efficient than" if the opponent isn't the League Baseline
+            if t2 != "League Average":
+                if i1_tot[f] > i2_tot[f]:
+                    diff = i1_tot[f] - i2_tot[f]
+                    advantage_text = f" ({t1} was {diff:+.2f} pts better)"
+            else:
+                # If comparing to league, just explain the value vs 0
+                advantage_text = " vs League Avg"
+                
             st.write(f"• **{f}**: {val:+.2f} points {label}{advantage_text}")
 
     with c2:
-        st.markdown(f"#### {t2} Impact")
-        for f in factors:
-            val = i2_tot[f]
-            label = "contribution" if val >= 0 else "cost"
-            advantage_text = ""
-            if i2_tot[f] > i1_tot[f]:
-                diff = i2_tot[f] - i1_tot[f]
-                advantage_text = f" ({t2} was {diff:+.2f} pts more efficient)"
-            st.write(f"• **{f}**: {val:+.2f} points {label}{advantage_text}")
-
+        if t2 == "League Average":
+            st.markdown("#### League Baseline")
+            st.info("The League Average is the 0.00 benchmark. Values on the left show how much this team deviates from the typical league performance.")
+        else:
+            st.markdown(f"#### {t2} Impact")
+            for f in factors:
+                val = i2_tot[f]
+                label = "contribution" if val >= 0 else "cost"
+                advantage_text = ""
+                if i2_tot[f] > i1_tot[f]:
+                    diff = i2_tot[f] - i1_tot[f]
+                    advantage_text = f" ({t2} was {diff:+.2f} pts better)"
+                st.write(f"• **{f}**: {val:+.2f} points {label}{advantage_text}")
     if mode == "Games Boxscores":
         st.markdown("---")
         st.subheader("Final Match Summary")
@@ -1718,12 +1770,16 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"] and analysis_type =
             for f in factors: 
                 st.markdown(f"**{f} Net: {i1_tot[f]:+.2f}** | Off: {i1_raw[0][f]:+.2f} | Def: {i1_raw[1][f]:+.2f}")
         with ec2:
-            st.write(f"### {t2} (Away)")
-            for f in factors: 
-                st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
+            if t2 == "League Average":
+                st.write("### League Average")
+                st.write("By definition, the League Average has 0.00 Net Impact because it is the baseline for all calculations.")
+            else:
+                st.write(f"### {t2} (Away)")
+                for f in factors: 
+                    st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
 
 # --- MASTER PDF EXPORT SECTION ---
-if mode in ["Season Aggregates per Team", "Games Boxscores"]:
+if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"]:
     st.markdown("---")
     if st.button("Generate PDF Report", key="master_pdf_btn"):
         # 1. Determine Source Stats
@@ -1761,9 +1817,16 @@ if mode in ["Season Aggregates per Team", "Games Boxscores"]:
             ]
 
         # 3. Generate and Show Download
-        sub = f"{season} Aggregate" if mode == "Season Aggregates per Team" else f"{game_record['round']} Boxscore"
+        # Define the subtitle based on the current mode
+        if mode == "Season Aggregates per Team":
+            sub = f"{season} Team Profile"
+        elif mode == "Head to Head Matchup":
+            sub = f"{season} H2H Aggregate"
+        else: # This is "Games Boxscores"
+            sub = f"{game_record['round']} Boxscore"
+
+        # Now pass that 'sub' variable into the report generator
         pdf_bytes = generate_unified_report(chart_buf, t1, t2, analysis_type, sub, table_rows)
-        
         st.download_button(
             label="Download PDF Report",
             data=pdf_bytes,
