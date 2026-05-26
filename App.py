@@ -2483,36 +2483,30 @@ elif mode == "Overall League Standings":
     selected_phase = st.sidebar.selectbox("Phase / Group", phase_options, key="standings_phase")
     
     st.subheader(f"{league} {season} - {selected_phase}")
-        # --- NEW: HORIZONTAL PERSPECTIVE TOGGLE ---
-    st.markdown("#### Analysis Perspective")
-    view_type = st.radio(
-        "Choose how to view the league:", 
-        ["Net Impact", "Offensive Impact", "Defensive Impact"], 
-        horizontal=True, 
-        key="standings_view_type"
-    )
-    # This is the moved Note - placed as a caption for a cleaner look
-    st.caption("This toggle updates the Team Standings table. Use the checkboxes inside the Player Leaderboard tab to expand individual stats.")
+    
+    # --- UI CONTROLS ON MAIN PAGE ---
+    view_type = st.radio("Metric View", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True)
+    st.info("**Note:** This toggle updates the **Team Standings** table. Use the checkboxes inside the **Player Leaderboard** tab to expand individual stats.")
     st.markdown("---")
+    
+    # --- 2. DEFINE TEAMS TO ANALYZE GLOBALLY FOR BOTH TABS ---
+    if selected_phase == "Overall Season":
+        teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
+    else:
+        df_ph = df_league[df_league['phase'] == selected_phase]
+        teams_to_analyze = sorted(list(set(df_ph['t1'].unique()) | set(df_ph['t2'].unique())))
 
-    # --- TABS: Team vs Players ---
+    # --- 3. ALWAYS SHOW BOTH TABS ---
     tab_standings_team, tab_standings_players = st.tabs(["Team Standings", "Player Leaderboard"])
     show_player_standings = True
+
     with tab_standings_team:
-        # --- START OF ORIGINAL TEAM STANDINGS LOGIC ---
         # Calculation of benchmarks (Midpoints)
         lg_fga = lg_data['f2a'] + lg_data['f3a']
         avg_efg = (lg_data['f2m'] + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
         avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if lg_fga > 0 else 0.15
         avg_ftr = lg_data['fta'] / lg_fga if lg_fga > 0 else 0.25
         avg_orb = lg_orb_pct
-
-        # Filter Teams
-        if selected_phase == "Overall Season":
-            teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
-        else:
-            df_ph = df_league[df_league['phase'] == selected_phase]
-            teams_to_analyze = sorted(list(set(df_ph['t1'].unique()) | set(df_ph['t2'].unique())))
 
         league_results = []
         with st.spinner("Calculating team standings..."):
@@ -2567,17 +2561,13 @@ elif mode == "Overall League Standings":
             standings_df = pd.DataFrame(league_results)
             
             # 1. DYNAMIC SORT SELECTOR
-            # Define which columns are "Rankable"
             if analysis_type == "4-Factors Net Points":
                 rank_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
             else:
-                # For Situational, we rank by the main percentages or volumes
                 rank_cols = ["eFG%", "Pts off TO", "2nd Chance", "Fast Break", "TO%", "ORB%", "FTR"]
             
-            # Ensure the columns actually exist in the dataframe
             available_ranks = [c for c in rank_cols if c in standings_df.columns]
             
-            # UI Selector for Ranking
             rank_c1, rank_c2 = st.columns([1, 3])
             with rank_c1:
                 chosen_team_rank = st.selectbox("Rank Teams By:", available_ranks, key="team_rank_sel")
@@ -2605,30 +2595,16 @@ elif mode == "Overall League Standings":
 
             format_dict["Pos"] = "{:.0f}"
 
-                        # 4. APPLY STYLING
+            # 4. APPLY STYLING
             styler = standings_df[cols_visible].style.format(format_dict)
 
-            # --- FIXED GRADIENT LOGIC ---
+            # APPLY GRADIENTS
             for col in grad_cols:
-                # Choose the correct colormap
+                v_max = standings_df[col].abs().max()
+                v_max = max(v_max, 1.0)
                 cmap = custom_gnwr if "TO%" in col else custom_rdwgn
-                
-                if view_type == "Net Impact":
-                    # For Net Impact, 0 must be the center (White)
-                    # We use the absolute maximum of the column to keep the scale symmetrical
-                    v_max = standings_df[col].abs().max()
-                    if v_max == 0: v_max = 1.0 # Avoid division by zero
-                    styler = styler.background_gradient(
-                        cmap=cmap, subset=[col], vmin=-v_max, vmax=v_max
-                    )
-                else:
-                    # For Offensive or Defensive Impact, values are all positive.
-                    # We let Pandas automatically use the min and max of the column.
-                    # This ensures the best team is Green and the worst is Red 
-                    # based on the league's actual distribution, not a fixed 1.0.
-                    styler = styler.background_gradient(
-                        cmap=cmap, subset=[col]
-                    )
+                styler = styler.background_gradient(cmap=cmap, subset=[col], vmin=-v_max, vmax=v_max)
+
             # 5. RENDER
             st.dataframe(
                 styler, 
@@ -2641,73 +2617,88 @@ elif mode == "Overall League Standings":
                     "Pos": st.column_config.NumberColumn("Pos", width="small")
                 }
             )
-        # --- END OF ORIGINAL TEAM STANDINGS LOGIC ---
-# --- 1. THE PLAYER TAB LOGIC ---
-    if show_player_standings:
-        with tab_standings_players:
-            if analysis_type == "4-Factors Net Points":
-                col_ctrl_l1, col_ctrl_l2 = st.columns(2)
-                with col_ctrl_l1: exp_ld_offdef = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_ld")
-                with col_ctrl_l2: exp_ld_shoot = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_ld")
-            else:
-                exp_ld_offdef, exp_ld_shoot = False, False
 
+# --- THE PLAYER TAB LOGIC ---
+    with tab_standings_players:
+        # The Checkboxes (You can keep them visible, they just won't trigger anything in Classic)
+        col_ctrl_l1, col_ctrl_l2 = st.columns(2)
+        with col_ctrl_l1:
+            exp_ld_offdef = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_ld")
+        with col_ctrl_l2:
+            exp_ld_shoot = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_ld")
+        
         st.markdown("---")
 
         with st.spinner("Gathering league-wide player data..."):
+            # --- THE FIX: CALL THE CORRECT DATA GATHERER BASED ON VIEW ---
             if analysis_type == "4-Factors Net Points":
                 df_league_players = get_league_player_leaderboard(league, season, selected_phase)
             else:
                 df_league_players = get_league_player_leaderboard_classic_v4(league, season, selected_phase)
-
-        if df_league_players.empty:
-            st.warning("No individual player data found for this selection.")
-        else:
-            # Sorting logic
-            if analysis_type == "4-Factors Net Points":
-                if view_type == "Offensive Impact": sort_col, title_prefix = 'Off_NP', "Top 50 Offensive"
-                elif view_type == "Defensive Impact": sort_col, title_prefix = 'Def_NP', "Top 50 Defensive"
-                else: sort_col, title_prefix = 'Total_NP', "Top 50 Overall"
-            else:
-                sort_col, title_prefix = 'PTS', "Top 50 Boxscore"
             
-            if sort_col not in df_league_players.columns and 'PTS' in df_league_players.columns:
-                sort_col = 'PTS'
+            # --- FILTER THE PLAYERS TO ONLY THOSE IN THE SELECTED GROUP ---
+            if df_league_players is not None and not df_league_players.empty:
+                df_league_players = df_league_players[df_league_players['Team_Name'].isin(teams_to_analyze)]
+            
+            if df_league_players is None or df_league_players.empty:
+                st.warning("No individual player data found for this selection.")
+            else:
+                # Sorting logic based on mode
+                if analysis_type == "4-Factors Net Points":
+                    if view_type == "Offensive Impact":
+                        sort_col, title_prefix = 'Off_NP', "Top 50 Offensive"
+                    elif view_type == "Defensive Impact":
+                        sort_col, title_prefix = 'Def_NP', "Top 50 Defensive"
+                    else:
+                        sort_col, title_prefix = 'Total_NP', "Top 50 Overall"
+                else:
+                    sort_col, title_prefix = 'PTS', "Top 50 Classic"
 
-            df_leaderboard = df_league_players.sort_values(sort_col, ascending=False) if sort_col in df_league_players.columns else df_league_players
+                # Safely fallback to another column if sort_col is missing
+                if sort_col not in df_league_players.columns:
+                    numeric_cols = df_league_players.select_dtypes(include=['number']).columns
+                    if len(numeric_cols) > 0: sort_col = numeric_cols[0]
+                    else: sort_col = df_league_players.columns[0]
 
-            st.markdown(f"### {title_prefix} Impact ({selected_phase})")
-            display_player_table(df_leaderboard.head(50), "League Leaderboard", exp_ld_offdef, exp_ld_shoot)
-    # --- 2. THE PDF BUTTON (Placed outside the tabs so it's always visible) ---
+                df_leaderboard = df_league_players.sort_values(sort_col, ascending=False)
+                
+                st.markdown(f"### {title_prefix} Impact ({selected_phase})")
+                
+                # USING YOUR ORIGINAL RENDERER (It handles the Classic columns perfectly!)
+                display_player_table(df_leaderboard.head(50), "League Leaderboard", exp_ld_offdef, exp_ld_shoot)
+
+    # --- THE PDF BUTTON ---
     st.markdown("---")
-    
-    # We use columns to make the button smaller (only taking up 1/3 of the width)
     col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 1, 1])
-    
     with col_pdf1:
         pdf_leaderboard_data = None
         if show_player_standings:
+            # Apply the same data fork for the PDF generation!
             if analysis_type == "4-Factors Net Points":
                 pdf_leaderboard_data = get_league_player_leaderboard(league, season, selected_phase)
             else:
                 pdf_leaderboard_data = get_league_player_leaderboard_classic_v4(league, season, selected_phase)
+                
+            # Apply the same safety filter for the PDF
+            if pdf_leaderboard_data is not None and not pdf_leaderboard_data.empty:
+                pdf_leaderboard_data = pdf_leaderboard_data[pdf_leaderboard_data['Team_Name'].isin(teams_to_analyze)]
 
         st.download_button(
-    label="Download Standings PDF", 
-    data=generate_standings_pdf(
-        standings_df, 
-        league, 
-        season, 
-        selected_phase, 
-        analysis_type, 
-        pdf_leaderboard_data
-    ), 
-    file_name=f"Standings_{selected_phase}.pdf",
-    mime="application/pdf",           # <--- ADD THIS LINE
-    key="btn_league_standings_final"  # <--- KEEP THE KEY OUTSIDE
-)
+            label="Download Standings PDF", 
+            data=generate_standings_pdf(
+                standings_df, 
+                league, 
+                season, 
+                selected_phase, 
+                analysis_type, 
+                pdf_leaderboard_data
+            ), 
+            file_name=f"Standings_{selected_phase}.pdf",
+            mime="application/pdf",
+            key="btn_league_standings_final" 
+        )
 
-    st.stop() # End of the block
+    st.stop()
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
     df_f = df_league[df_league['season'] == season].copy()
