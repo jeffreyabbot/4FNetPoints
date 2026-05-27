@@ -3,10 +3,8 @@ import pandas as pd
 import plotly.graph_objects as go
 import os
 import tempfile
-from fpdf import FPDF
 import json
 import re
-from fpdf.enums import XPos, YPos
 import matplotlib.pyplot as plt
 import io
 import base64
@@ -25,13 +23,6 @@ LEAGUE_CONFIG = {
 }
 from matplotlib.colors import LinearSegmentedColormap
 
-# Define a soft Red-White-Green colormap
-# Colors: Light Red (#ff9999), White (#ffffff), Light Green (#99ff99)
-custom_rdwgn = LinearSegmentedColormap.from_list(
-    "custom_rdwgn", ["#ff9999", "#ffffff", "#99ff99"]
-)
-from matplotlib.colors import LinearSegmentedColormap
-
 # 1. Red-White-Green (Standard: High is Good)
 custom_rdwgn = LinearSegmentedColormap.from_list("rdwgn", ["#ff9999", "#ffffff", "#99ff99"])
 
@@ -45,6 +36,60 @@ def clean_num(val):
     try: return float(val)
     except: return 0.0
 # --- HELPERS ---
+def inject_print_engine():
+    st.markdown(
+        """
+        <style>
+            @media print {
+                /* 1. Page Setup */
+                @page {
+                    size: landscape;
+                    margin: 0.5cm;
+                }
+
+                /* 2. Hide UI Clutter */
+                [data-testid="stSidebar"], 
+                [data-testid="stHeader"], 
+                header, 
+                footer, 
+                .stButton, 
+                [data-testid="stTableSettings"], 
+                .print-hide {
+                    display: none !important;
+                }
+
+                /* 3. Maximize Main Area */
+                .main .block-container {
+                    max-width: 100% !important;
+                    width: 100% !important;
+                    padding: 0 !important;
+                    margin: 0 !important;
+                }
+
+                /* 4. FIX PLOTLY: Scale the outer container, leave internals intact */
+                [data-testid="stPlotlyChart"] {
+                    zoom: 0.85 !important; /* Shrinks the whole chart safely */
+                    page-break-inside: avoid !important;
+                    margin-bottom: 20px !important;
+                }
+
+                /* 5. FIX TABLES: Scale outer container */
+                [data-testid="stDataFrame"], [data-testid="stTable"] {
+                    zoom: 0.80 !important; /* Shrinks the table to fit the paper */
+                    page-break-inside: avoid !important;
+                }
+
+                /* 6. Force background colors for Heatmaps & Bars */
+                * {
+                    -webkit-print-color-adjust: exact !important;
+                    print-color-adjust: exact !important;
+                    color-adjust: exact !important;
+                }
+            }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 @st.cache_resource # This makes the search instant after the first time
 def get_league_player_leaderboard(league, season, phase_ui):
     """Gathers every player from every team in the league into one table."""
@@ -80,45 +125,6 @@ def get_league_player_leaderboard(league, season, phase_ui):
     final_df = final_df[mask_human].copy()
 
     return final_df
-def get_logo_filename_map(version=1): # Change this number to force a re-scan
-    folder_path = os.path.join(LOGOS_PATH, "teams")
-    if not os.path.exists(folder_path):
-        return {}
-    
-    mapping = {}
-    for f in os.listdir(folder_path):
-        if f.lower().endswith(".png"):
-            name_part = os.path.splitext(f)[0]
-            team_key = normalize_str(name_part)
-            mapping[team_key] = f
-    return mapping
-def generate_aggregate_pdf(t1, t2, season, t1_stats, t2_stats, analysis_type):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"Season Aggregates per Team: {t1} vs {t2} ({season})", ln=True, align='C')
-    pdf.ln(10)
-    
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(0, 8, f"Mode: {analysis_type}", ln=True)
-    pdf.ln(5)
-    
-    # Table of stats
-    pdf.set_font("Helvetica", '', 10)
-    if analysis_type == "Situational Points":
-        cols = ["Metric", t1, t2]
-        data = [
-            ("Pts off TO", f"{t1_stats['pts_off_to']:.1f}", f"{t2_stats['pts_off_to']:.1f}"),
-            ("2nd Chance", f"{t1_stats['pts_2nd_ch']:.1f}", f"{t2_stats['pts_2nd_ch']:.1f}"),
-            ("Fast Break", f"{t1_stats['pts_fb']:.1f}", f"{t2_stats['pts_fb']:.1f}")
-        ]
-        for col in cols: pdf.cell(50, 8, col, border=1, align='C')
-        pdf.ln()
-        for row in data:
-            for item in row: pdf.cell(50, 8, item, border=1, align='C')
-            pdf.ln()
-            
-    return bytes(pdf.output(dest='S'))
 def normalize_str(text):
     if not text: return ""
     import unicodedata
@@ -202,62 +208,7 @@ def get_team_icon(team_name, current_league=None):
         except Exception:
             return None
     return None
-def create_pdf_chart_mpl(data_l, data_r, team_l, team_r):
-    labels = ["Shooting", "Rebounding", "Turnovers", "Free Throws"]
-    vals_l = [data_l[k] for k in labels]
-    vals_r = [data_r[k] for k in labels]
-    
-    fig, ax = plt.subplots(figsize=(10, 5))
-    y = range(len(labels))
-    width = 0.35
-    
-    # UPDATED COLORS: Dark Blue (#1e2130) and Red (#F00000)
-    bar1 = ax.barh([i + width/2 for i in y], vals_l, width, label=team_l, color='#1e2130')
-    bar2 = ax.barh([i - width/2 for i in y], vals_r, width, label=team_r, color='#F00000')
-    
-    ax.bar_label(bar1, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
-    ax.bar_label(bar2, fmt='%+.1f', padding=3, color='white', label_type='center', fontsize=9, weight='bold')
-    
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.invert_yaxis()
-    ax.axvline(0, color='black', linewidth=1)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.1), ncol=2, frameon=False)
-    
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-def create_pdf_situational_mpl(s1, s2, t1, t2, lg_stats):
-    labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
-    vals_t1 = [s1.get("pts_off_to", 0), s1.get("pts_2nd_ch", 0), s1.get("pts_fb", 0)]
-    vals_t2 = [s2.get("pts_off_to", 0), s2.get("pts_2nd_ch", 0), s2.get("pts_fb", 0)]
-    avg_vals = [lg_stats.get("pts_off_to", 0), lg_stats.get("pts_2nd_ch", 0), lg_stats.get("pts_fb", 0)]
-    
-    fig, ax = plt.subplots(figsize=(10, 4))
-    y = range(len(labels))
-    width = 0.35
-    
-    ax.barh([i + width/2 for i in y], vals_t1, width, label=t1, color='#1e2130')
-    ax.barh([i - width/2 for i in y], vals_t2, width, label=t2, color='#F00000')
-    
-    # Add dashed average lines
-    for i, avg in enumerate(avg_vals):
-        ax.vlines(x=avg, ymin=i-0.4, ymax=i+0.4, color='gray', linestyle='--', linewidth=1.5, label='Lg. Avg' if i==0 else "")
-    
-    ax.set_yticks(y)
-    ax.set_yticklabels(labels)
-    ax.invert_yaxis()
-    ax.legend(loc='upper center', bbox_to_anchor=(0.5, 1.15), ncol=3, frameon=False)
-    
-    buf = io.BytesIO()
-    plt.savefig(buf, format='png', bbox_inches='tight', dpi=150)
-    plt.close(fig)
-    buf.seek(0)
-    return buf
+
 def load_single_game_individual(file_path, target_team):
     """
     Finds the individual player file for a specific game and filters it 
@@ -357,365 +308,6 @@ def load_single_game_individual(file_path, target_team):
     except Exception as e:
         # st.error(f"Error loading individual file: {e}")
         return None
-def pdf_add_player_table(pdf, df, title, num_games=1):
-    """Adds player table to PDF: Case-insensitive column discovery and artifact cleaning."""
-    if df is None or df.empty:
-        return
-
-    # 1. SMART COLUMN DISCOVERY
-    # Create a map so we can find 'Total_NP' even if it is 'TOTAL_NP'
-    col_map = {c.upper(): c for c in df.columns}
-    
-    def get_actual_col(target_name):
-        return col_map.get(target_name.upper())
-
-    p_col = get_actual_col('Player')
-    total_col = get_actual_col('Total_NP') or get_actual_col('PTS')
-    shoot_col = get_actual_col('Net_Shooting') or get_actual_col('eFG%')
-    tov_col = get_actual_col('Net_TOV') or get_actual_col('TO%')
-    orb_col = get_actual_col('Net_ORB') or get_actual_col('OR/40')
-    ft_col = get_actual_col('Net_FT') or get_actual_col('FTR')
-
-        # If we can't even find the Player or Total column, abort to prevent crash
-    if not p_col or not total_col:
-        return
-
-    # 2. CLEAN AND PREPARE DATA
-    artifacts = ['--- TOTAL ---', 'TOTAL', 'EQUIP', 'EFI', 'TEAM']
-    df_clean = df[~df[p_col].str.upper().isin(artifacts)].copy()
-
-    # Identify the 'TEAM [NAME]' row (uncredited events)
-    is_team_events_row = df_clean[p_col].str.startswith('TEAM ', na=False)
-    
-    # SORT using the discovered Total column
-    df_players = df_clean[~is_team_events_row].sort_values(total_col, ascending=False)
-    df_events = df_clean[is_team_events_row].copy()
-
-    # Rename Team Events for the PDF
-    if not df_events.empty:
-        current_name = str(df_events.iloc[0][p_col])
-        team_name_only = current_name.replace('TEAM ', '').strip()
-        df_events.at[df_events.index[0], p_col] = f"Team Events ({team_name_only})"
-
-    # 3. CALCULATE THE TRUE TOTAL
-    stats_cols = [total_col, shoot_col, tov_col, orb_col, ft_col]
-    # Filter out None values in case a factor column is missing
-    stats_cols = [c for c in stats_cols if c is not None]
-    
-    totals = df_clean[stats_cols].sum()
-    
-    total_row_dict = {p_col: 'TOTAL'}
-    for col in stats_cols:
-        total_row_dict[col] = totals[col]
-        
-    df_total_row = pd.DataFrame([total_row_dict])
-
-    # Combine in order: Players -> Team Events -> TOTAL
-    df_final = pd.concat([df_players, df_events, df_total_row])
-
-    # 4. DEFINE TABLE STRUCTURE
-    if num_games > 1:
-        # Create the average column
-        df_final['Per Game'] = df_final[total_col] / num_games
-        cols = [p_col, total_col, 'Per Game', shoot_col, tov_col, orb_col, ft_col]
-        widths = [55, 23, 23, 23, 23, 23, 20]
-    else:
-        cols = [p_col, total_col, shoot_col, tov_col, orb_col, ft_col]
-        widths = [60, 26, 26, 26, 26, 26]
-    
-    # Filter out any None columns (safety)
-    cols = [c for c in cols if c is not None]
-
-    # 5. PDF DRAWING
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.cell(0, 10, pdf_safe_text(title), ln=True)
-    pdf.ln(2)
-    
-    # Draw Headers
-    pdf.set_font("Helvetica", 'B', 9)
-    pdf.set_fill_color(230, 230, 230)
-    for i, col in enumerate(cols):
-        label = str(col).replace('Net_', '').replace('Total_NP', 'Total')
-        pdf.cell(widths[i], 8, label, border=1, align='C', fill=True)
-    pdf.ln()
-
-    # Draw Rows
-    for _, row in df_final.iterrows():
-        p_name = str(row[p_col])
-        is_grand_total = (p_name == 'TOTAL')
-        
-        if is_grand_total:
-            pdf.set_font("Helvetica", 'B', 8)
-            pdf.set_fill_color(235, 235, 235)
-        else:
-            pdf.set_font("Helvetica", '', 8)
-            pdf.set_fill_color(255, 255, 255)
-
-        # Name Column
-        pdf.cell(widths[0], 7, pdf_safe_text(p_name)[:35], border=1, fill=True)
-
-        # Stat Columns
-        for i in range(1, len(cols)):
-            val = row.get(cols[i], 0)
-            txt = f"{val:+.2f}" if cols[i] != p_col else str(val)
-            
-            # Coloring Logic
-            if isinstance(val, (int, float)):
-                if val < -1.0: pdf.set_text_color(200, 0, 0)
-                elif val > 1.0: pdf.set_text_color(0, 150, 0)
-                else: pdf.set_text_color(0, 0, 0)
-            
-            pdf.cell(widths[i], 7, txt, border=1, align='C', fill=True)
-            pdf.set_text_color(0, 0, 0) 
-        pdf.ln()
-        
-        if pdf.get_y() > 275: pdf.add_page()
-def generate_unified_report(chart_buf, t1, t2, analysis_type, subtitle, table_data=None, p1_df=None, p2_df=None, n_games=1):
-    pdf = FPDF()
-    pdf.add_page()
-    effective_width = 190 
-    
-    # 1. Title & Subtitle
-    pdf.set_font("Helvetica", 'B', 14)
-    pdf.set_x(10) 
-    pdf.multi_cell(effective_width, 8, pdf_safe_text(f"{analysis_type}: {t1} vs {t2}"), align='C')
-    pdf.set_font("Helvetica", '', 11)
-    pdf.set_text_color(100, 100, 100)
-    pdf.set_x(10)
-    pdf.multi_cell(effective_width, 8, pdf_safe_text(subtitle), align='C')
-    pdf.set_text_color(0, 0, 0)
-    pdf.ln(5)
-    
-    # 2. Chart
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        tmpfile.write(chart_buf.getbuffer())
-        pdf.image(tmpfile.name, x=15, w=180)
-    pdf.ln(10)
-    
-    # 3. Team Data Table (Existing)
-    if table_data:
-        pdf.set_font("Helvetica", 'B', 10)
-        pdf.set_fill_color(230, 230, 230)
-        pdf.cell(60, 8, "Metric", border=1, fill=True)
-        pdf.cell(65, 8, pdf_safe_text(t1)[:30], border=1, fill=True, align='C')
-        pdf.cell(65, 8, pdf_safe_text(t2)[:30], border=1, fill=True, align='C')
-        pdf.ln()
-        pdf.set_font("Helvetica", '', 10)
-        for label, v1, v2 in table_data:
-            pdf.cell(60, 8, label, border=1)
-            pdf.cell(65, 8, str(v1), border=1, align='C')
-            pdf.cell(65, 8, str(v2), border=1, align='C')
-            pdf.ln()
-
-    # 4. NEW: ADD PLAYER TABLES
-    if p1_df is not None:
-        pdf_add_player_table(pdf, p1_df, f"Individual Impact: {t1}", n_games) # Add n_games here
-    if p2_df is not None:
-        pdf_add_player_table(pdf, p2_df, f"Individual Impact: {t2}", n_games) # Add n_games here
-            
-    return bytes(pdf.output(dest='S'))
-def pdf_safe_text(text):
-    """Universal sanitizer for FPDF Helvetica."""
-    if not text: return ""
-    s = str(text)
-    # Manual icon fixes
-    s = s.replace("🟢", "W").replace("🔴", "L").replace("🏠", "(H)").replace("✈️", "(A)").replace("✈", "(A)")
-    # Convert to Latin-1 and ignore what doesn't fit (Standard for Helvetica)
-    return s.encode('latin-1', 'ignore').decode('latin-1')
-def load_single_game_classic_individual(file_path, target_team):
-    try:
-        df = pd.read_excel(file_path, header=None)
-        mask = df[0].astype(str).str.upper().str.strip().str.startswith("TOTAL")
-        total_rows = df[mask].index
-        if len(total_rows) < 2: return None
-
-        t1_name = str(df.iloc[1, 0]).strip()
-        t2_name = str(df.iloc[2, 0]).strip()
-
-        def make_match_key(text):
-            if not text or pd.isna(text): return ""
-            return re.sub(r'[\s\.]+', '', normalize_str(str(text)))
-
-        nk_target = make_match_key(target_team)
-        nk_t1 = make_match_key(t1_name)
-        nk_t2 = make_match_key(t2_name)
-
-        if nk_target == nk_t1 or nk_target in nk_t1 or nk_t1 in nk_target:
-            start_idx = 3
-            end_idx = total_rows[0]
-            team_row_idx = total_rows[0]
-        elif nk_target == nk_t2 or nk_target in nk_t2 or nk_t2 in nk_target:
-            start_idx = total_rows[0] + 2
-            end_idx = total_rows[1]
-            team_row_idx = total_rows[1]
-        else:
-            return None
-            
-        # --- NEW: CALCULATE TEAM POSSESSIONS FOR THE GAME ---
-        try:
-            t_f2a = float(clean_num(df.iloc[team_row_idx, 3]))
-            t_f3a = float(clean_num(df.iloc[team_row_idx, 5]))
-            t_fta = float(clean_num(df.iloc[team_row_idx, 7]))
-            t_tov = float(clean_num(df.iloc[team_row_idx, 14]))
-            team_poss = (t_f2a + t_f3a) + 0.44 * t_fta + t_tov
-            if team_poss <= 0: team_poss = 80.0
-        except:
-            team_poss = 80.0
-
-        df_players = df.iloc[start_idx:end_idx].copy()
-
-        df_players = df_players.rename(columns={
-            0: "Player", 1: "PTS", 2: "F2M", 3: "F2A", 4: "F3M", 5: "F3A",
-            6: "FTM", 7: "FTA", 8: "ORB", 9: "DRB", 10: "TRB", 14: "TOV",
-            19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break"
-        })
-
-        cols_to_keep = ["Player", "PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
-        valid_cols = [c for c in cols_to_keep if c in df_players.columns]
-        df_players = df_players[valid_cols]
-
-        df_players = df_players.dropna(subset=['Player'])
-        df_players = df_players[df_players['Player'].astype(str).str.strip() != ""]
-        
-        garbage = ['JUGADOR', 'ASISTENCIA', 'LUGAR', 'PABELLÓN', 'ÁRBITRO', 'ARBITRO', 'TOTAL', 'EQUIP', 'ENTRENADOR']
-        df_players = df_players[~df_players['Player'].astype(str).str.upper().apply(lambda x: any(g in x for g in garbage))]
-        
-        df_players['PTS'] = pd.to_numeric(df_players['PTS'], errors='coerce')
-        df_players = df_players.dropna(subset=['PTS'])
-
-        for c in valid_cols:
-            if c != "Player":
-                df_players[c] = pd.to_numeric(df_players[c], errors='coerce').fillna(0)
-
-        df_players['Team_Name'] = target_team
-        df_players['GP'] = 1
-        df_players['Team_Poss'] = team_poss  # Save to aggregate later
-        df_players['FGA'] = df_players['F2A'] + df_players['F3A']
-        df_players['FGM'] = df_players['F2M'] + df_players['F3M']
-
-        df_players['eFG%'] = df_players.apply(lambda x: (x['FGM'] + 0.5 * x['F3M']) / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
-        df_players['TO%'] = df_players.apply(lambda x: x['TOV'] / (x['FGA'] + 0.44 * x['FTA'] + x['TOV']) if (x['FGA'] + 0.44 * x['FTA'] + x['TOV']) > 0 else 0, axis=1)
-        df_players['FTR'] = df_players.apply(lambda x: x['FTM'] / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
-        df_players['OR/100'] = df_players.apply(lambda x: (x['ORB'] / team_poss) * 100 if team_poss > 0 else 0, axis=1)
-
-        return df_players
-    except Exception as e:
-        return None
-
-def load_aggregated_classic_individual_data(target_team, league, season, phase=None, opponent_team=None):
-    def get_sig_words(text):
-        s = normalize_str(text)
-        ignore = {'THE', 'CLUB', 'BASQUET', 'BASKET', 'BALONCESTO', 'DEPORTIVA', 'U.E.', 'C.B.'}
-        return {w for w in s.split() if len(w) > 2 and w not in ignore}
-
-    target_words = get_sig_words(target_team)
-    
-    mask_ls = (df_index['league'] == league) & (df_index['season'] == season)
-    if phase and phase != "Overall Season":
-        mask_ls = mask_ls & (df_index['phase'] == phase)
-    
-    df_ls = df_index[mask_ls].copy()
-    if df_ls.empty: return None
-
-    def is_matchup(row):
-        t1_w, t2_w = get_sig_words(row['t1']), get_sig_words(row['t2'])
-        has_target = len(target_words & t1_w) > 0 or len(target_words & t2_w) > 0
-        if not has_target: return False
-        if opponent_team:
-            opp_words = get_sig_words(opponent_team)
-            return (len(opp_words & t1_w) > 0 or len(opp_words & t2_w) > 0)
-        return True
-
-    matchup_games = df_ls[df_ls.apply(is_matchup, axis=1)]
-
-    all_game_stats = []
-    for _, row in matchup_games.iterrows():
-        df_game = load_single_game_classic_individual(row['path'], target_team)
-        if df_game is not None and not df_game.empty:
-            all_game_stats.append(df_game)
-
-    if not all_game_stats: return None
-    combined = pd.concat(all_game_stats, ignore_index=True)
-    
-    # Notice we sum Team_Poss here!
-    cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "Team_Poss"]
-    cols_to_sum = [c for c in cols_to_sum if c in combined.columns]
-    
-    h2h_totals = combined.groupby('Player')[cols_to_sum].sum().reset_index()
-
-    n_games = len(matchup_games)
-    for col in h2h_totals.columns:
-        if col not in ['Player', 'Team_Name', 'GP']:
-            h2h_totals[col] = h2h_totals[col] / n_games
-
-    h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
-    h2h_totals['TO%'] = h2h_totals.apply(lambda x: x.get('TOV',0) / (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) if (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) > 0 else 0, axis=1)
-    h2h_totals['FTR'] = h2h_totals.apply(lambda x: x.get('FTM',0) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
-    h2h_totals['OR/100'] = h2h_totals.apply(lambda x: (x.get('ORB',0) / x['Team_Poss']) * 100 if x.get('Team_Poss', 0) > 0 else 0, axis=1)
-    h2h_totals['Team_Name'] = target_team
-
-    return h2h_totals
-def generate_standings_pdf(df, league, season, phase, analysis_type, player_df=None):
-    """Generates Standings PDF and optionally adds the Player Leaderboard."""
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, pdf_safe_text(f"{league} Standings - {season}"), ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 10, pdf_safe_text(f"Phase: {phase} | {analysis_type}"), ln=True, align='C')
-    pdf.ln(10)
-
-    pdf.set_font("Helvetica", 'B', 8)
-    
-    # --- 1. TEAM STANDINGS TABLE ---
-    # We changed 'Rank' to 'Pos' to match the UI
-    if analysis_type == "4-Factors Net Points":
-        cols = ["Pos", "Team", "Shoot", "TOv", "Reb", "FT", "Net"]
-        keys = ["Pos", "Team", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Net Points"]
-        widths = [10, 65, 23, 23, 23, 23, 23]
-    else:
-        cols = ["Pos", "Team", "TO-P", "2nd-C", "FB-P", "eFG%", "TO%", "ORB%", "FTR"]
-        keys = ["Pos", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-        widths = [10, 54, 18, 18, 18, 18, 18, 18, 18]
-
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C')
-    pdf.ln()
-
-    pdf.set_font("Helvetica", '', 7)
-    for _, row in df.iterrows():
-        # --- THE FIX: Change 'Rank' to 'Pos' ---
-        pdf.cell(widths[0], 7, str(row['Pos']), border=1, align='C')
-        
-        t_name = pdf_safe_text(row['Team'])
-        if len(t_name) > 35: t_name = t_name[:32] + "..."
-        pdf.cell(widths[1], 7, t_name, border=1)
-        
-        for i in range(2, len(keys)):
-            key = keys[i]
-            val = row[key]
-            if isinstance(val, (int, float)):
-                if analysis_type == "4-Factors Net Points": txt = f"{val:+.2f}"
-                else:
-                    if key in ["eFG%", "TO%", "ORB%"]: txt = f"{val:.1%}"
-                    else: txt = f"{val:.2f}"
-            else: txt = str(val)
-            pdf.cell(widths[i], 7, txt, border=1, align='C')
-        pdf.ln()
-        if pdf.get_y() > 275: pdf.add_page()
-    
-    # --- 2. PLAYER LEADERBOARD PAGE ---
-    if player_df is not None and not player_df.empty:
-        # Check if we are in Net Points or Classic mode
-        sort_col = 'Total_NP' if 'Total_NP' in player_df.columns else 'PTS'
-        
-        # Sort and take top 30
-        if sort_col in player_df.columns:
-            top_players = player_df.sort_values(sort_col, ascending=False).head(30)
-            pdf_add_player_table(pdf, top_players, f"League Leaderboard: Top 30 Players ({phase})")
-
-    return bytes(pdf.output(dest='S'))
 def get_h2h_stats(t1, t2, league, season):
     def make_match_key(text):
         if not text: return ""
@@ -806,97 +398,6 @@ def load_h2h_individual_data(target_team, opponent_team, league, season):
             h2h_totals[col] = h2h_totals[col] / len(matchup_games)
         
     return h2h_totals
-def generate_performance_pdf(df, team, league, season, view_type, analysis_type):
-    pdf = FPDF()
-    pdf.add_page()
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, pdf_safe_text(f"Scouting Report: {team}"), ln=True, align='C')
-    pdf.set_font("Helvetica", '', 12)
-    pdf.cell(0, 8, pdf_safe_text(f"{league} {season} | {analysis_type} ({view_type})"), ln=True, align='C')
-    pdf.ln(5)
-
-    # 1. Summary Box
-    pdf.set_fill_color(245, 245, 245)
-    pdf.set_font("Helvetica", 'B', 11)
-    pdf.cell(0, 10, "  Batch Scouting Summary (Averages)", border=1, ln=True, fill=True)
-    pdf.set_font("Helvetica", '', 9)
-    
-    if analysis_type == "4-Factors Net Points":
-        for f in ["Shooting", "Rebounding", "Turnovers", "Free Throws"]:
-            line = f" {f}: Net {df[f+'_Net'].mean():+.2f} | Off: {df[f+'_Off'].mean():+.2f} | Def: {df[f+'_Def'].mean():+.2f}"
-            pdf.cell(0, 7, pdf_safe_text(line), border='LR', ln=True)
-    else:
-        # Situational Averages
-        for f in ["Pts off TO", "2nd Chance", "Fast Break"]:
-            line = f" {f}: Average {df[f].mean():.2f} pts per game"
-            pdf.cell(0, 7, pdf_safe_text(line), border='LR', ln=True)
-    pdf.cell(190, 0, "", border='T', ln=True)
-    pdf.ln(8)
-
-    # 2. Setup Headers and Widths
-    pdf.set_font("Helvetica", 'B', 8)
-    if analysis_type == "4-Factors Net Points":
-        cols = ["Round", "Matchup", "Shoot", "TOv", "Reb", "FT", "Total"]
-        data_keys = ["Round", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-        # Total: 12 + 65 + (23 * 4) + 21 = 190mm
-        widths = [12, 65, 23, 23, 23, 23, 21] 
-    else:
-        # Situational: 9 columns
-        cols = ["Round", "Matchup", "TO-P", "2nd-C", "FB-P", "eFG%", "TO%", "ORB%", "FTR"]
-        data_keys = ["Round", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-        # Total: 12 + 52 + (18 * 7) = 190mm
-        widths = [12, 52, 18, 18, 18, 18, 18, 18, 18]
-
-    for i, col in enumerate(cols):
-        pdf.cell(widths[i], 8, col, border=1, align='C')
-    pdf.ln()
-
-    # 3. Draw Rows
-    pdf.set_font("Helvetica", '', 7)
-    for _, row in df.iterrows():
-        # Column 0: Round
-        pdf.cell(widths[0], 7, pdf_safe_text(str(row['Round'])), border=1, align='C')
-        
-        # Column 1: Matchup (Truncate long names to prevent overlap)
-        m_text = pdf_safe_text(row['Matchup'])
-        if analysis_type == "4-Factors Net Points":
-            limit = 45 # More space in 4F mode
-        else:
-            limit = 35 # Less space in Situational mode
-        if len(m_text) > limit: m_text = m_text[:limit-3] + "..."
-        pdf.cell(widths[1], 7, m_text, border=1)
-        
-        # Columns 2+: Data
-        for i in range(2, len(data_keys)):
-            key = data_keys[i]
-            val = row[key]
-            
-            if isinstance(val, (int, float)):
-                if analysis_type == "4-Factors Net Points":
-                    txt = f"{val:+.2f}"
-                else:
-                    if key in ["eFG%", "TO%", "ORB%"]:
-                        txt = f"{val:.1%}"
-                    elif key == "FTR":
-                        txt = f"{val:.2f}"
-                    else:
-                        txt = f"{val:.2f}"
-            else:
-                txt = str(val)
-                
-            pdf.cell(widths[i], 7, txt, border=1, align='C')
-        pdf.ln()
-        
-        # Page Break Logic
-        if pdf.get_y() > 270: 
-            pdf.add_page()
-            pdf.set_font("Helvetica", 'B', 8)
-            for j, col in enumerate(cols):
-                pdf.cell(widths[j], 8, col, border=1, align='C')
-            pdf.ln()
-            pdf.set_font("Helvetica", '', 7)
-        
-    return bytes(pdf.output(dest='S'))
 def get_per_game_volumes_by_phase(team_name, league, season, phase, row_label="TOTAL"):
     # Convert UI phase name (e.g. "Regular Season - ESTE") back to folder name ("Regular_Season")
     # We take the part before the " - " and replace spaces with underscores
@@ -1128,7 +629,6 @@ def load_single_game_classic_individual(file_path, target_team):
         return df_players
     except Exception as e:
         return None
-
 def load_aggregated_classic_individual_data(target_team, league, season, phase=None, opponent_team=None):
     def get_sig_words(text):
         s = normalize_str(text)
@@ -1204,7 +704,6 @@ def get_league_player_leaderboard_classic_v4(league, season, phase_ui):
     mask_human = ~final_df[p_col].str.contains(pattern, case=False, na=False)
     
     return final_df[mask_human].copy()
-
 def load_h2h_classic_individual_data(target_team, opponent_team, league, season):
     def get_sig_words(text):
         s = normalize_str(text)
@@ -1251,7 +750,6 @@ def load_h2h_classic_individual_data(target_team, opponent_team, league, season)
     h2h_totals['Team_Name'] = target_team
 
     return h2h_totals
-
 def load_individual_aggregate_classic(team_name, league, season, phase=None):
     df = load_individual_aggregate(team_name, league, season, phase)
     if df is None or df.empty: return None
@@ -1268,7 +766,6 @@ def load_individual_aggregate_classic(team_name, league, season, phase=None):
         df['TO%'] = df.apply(lambda x: x[tov] / (x['FGA'] + 0.44 * x[fta] + x[tov]) if (x['FGA'] + 0.44 * x[fta] + x[tov]) > 0 else 0, axis=1)
         df['FTR'] = df.apply(lambda x: x[ftm] / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
     return df
-
 def display_player_table(df, title, show_off_def=False, show_shooting=False):
     if df is None or df.empty:
         st.warning(f"No player data found for {title}")
@@ -1365,7 +862,26 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
             v_max = max(v_max, 1.0)
             styler = styler.background_gradient(cmap=custom_rdwgn, subset=[col], vmin=-v_max, vmax=v_max)
 
-    st.dataframe(styler, use_container_width=True, hide_index=True, height=500, column_config={"Pos": st.column_config.NumberColumn("Pos", width="small"), p_col: st.column_config.TextColumn("Player", width="medium")})
+    # --- THE MAGIC FIX: DYNAMIC HEIGHT & COLUMN WIDTHS ---
+    dynamic_height = (len(df_final) * 36) + 45
+
+    # 1. Start with the base column configuration
+    col_config = {
+        "Pos": st.column_config.NumberColumn("Pos", width="small"), 
+        p_col: st.column_config.TextColumn("Player", width="medium")
+    }
+    
+    # 2. Force every single numeric column to be "small" so they don't stretch
+    for col in numeric_cols:
+        col_config[col] = st.column_config.NumberColumn(col, width="small")
+
+    st.dataframe(
+        styler, 
+        use_container_width=False, # Keeps it looking nice on screen
+        hide_index=True, 
+        height=dynamic_height, 
+        column_config=col_config  # Applies our strict column widths
+    )
 def get_teams_in_league(league, season): # Added season param
     teams = set()
     season_path = os.path.join(DATA_BASE_PATH, league, season) # Target specific season
@@ -1590,7 +1106,6 @@ def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
     
     fig = go.Figure()
     
-    # Home Team
     fig.add_trace(go.Bar(
         y=labels, x=vals_l, orientation='h', name=team_l, 
         marker_color="#1e2130", text=[f"{v:+.1f}" for v in vals_l], 
@@ -1598,7 +1113,6 @@ def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
         cliponaxis=False
     ))
     
-    # Away Team
     fig.add_trace(go.Bar(
         y=labels, x=vals_r, orientation='h', name=team_r, 
         marker_color="#FF0000", text=[f"{v:+.1f}" for v in vals_r], 
@@ -1606,19 +1120,33 @@ def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
         cliponaxis=False
     ))
     
+    # --- FIXED RANGE LOGIC ---
+    all_vals = vals_l + vals_r
+    x_min = min(all_vals)
+    x_max = max(all_vals)
+    
+    # Force the axis to always show at least from -1 to +1 around zero 
+    # so the 0-line is never on the very edge.
+    range_min = min(x_min * 1.2 if x_min < 0 else x_min - 1, -1.0)
+    range_max = max(x_max * 1.2 if x_max > 0 else x_max + 1, 1.0)
+    
     fig.update_layout(
-        barmode='group', height=400,
-        margin=dict(l=100, r=100, t=20, b=40),
+        barmode='group', 
+        height=400, 
+        # l=150 for labels, r=180 for a HUGE safety buffer on the right
+        margin=dict(l=150, r=180, t=40, b=40), 
         xaxis=dict(
+            # Keep your existing range logic here
             showgrid=True, gridcolor='#E5E7E9', griddash='dot',
             zeroline=True, zerolinecolor='#34495e', zerolinewidth=1.5
         ),
-        yaxis=dict(autorange="reversed", showgrid=False),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        yaxis=dict(autorange="reversed", showgrid=False, automargin=True),
+        # x=0.8 pushes the legend further left, away from the paper edge
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=0.8),
         plot_bgcolor='white'
     )
     return fig
-from fpdf.enums import XPos, YPos
+
 def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
     labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
     
@@ -1633,12 +1161,10 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
     vals_t1 = [safe_get(t1_stats, "pts_off_to"), safe_get(t1_stats, "pts_2nd_ch"), safe_get(t1_stats, "pts_fb")]
     vals_t2 = [safe_get(t2_stats, "pts_off_to"), safe_get(t2_stats, "pts_2nd_ch"), safe_get(t2_stats, "pts_fb")]
     
-    # Check if everything is zero
     is_empty = (sum(vals_t1) + sum(vals_t2)) == 0
 
     fig = go.Figure()
 
-    # Trace 1
     fig.add_trace(go.Bar(
         y=labels, 
         x=vals_t1, 
@@ -1646,11 +1172,10 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
         name=t1_name, 
         marker_color='#1e2130', 
         text=[f"{v:.1f}" for v in vals_t1], 
-        textposition='outside', # <--- Move text OUTSIDE so 0.0 is visible
-        cliponaxis=False         # Ensure the 0.0 isn't cut off
+        textposition='outside', 
+        cliponaxis=False
     ))
 
-    # Trace 2
     fig.add_trace(go.Bar(
         y=labels, 
         x=vals_t2, 
@@ -1658,18 +1183,16 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
         name=t2_name, 
         marker_color="#F00000", 
         text=[f"{v:.1f}" for v in vals_t2], 
-        textposition='outside', # <--- Move text OUTSIDE
+        textposition='outside', 
         cliponaxis=False
     ))
     
-    # Add League Average Lines (only if not empty, to keep it clean)
     if not is_empty:
         avg_vals = [safe_get(lg_stats, "pts_off_to"), safe_get(lg_stats, "pts_2nd_ch"), safe_get(lg_stats, "pts_fb")]
         for i, avg in enumerate(avg_vals):
             fig.add_shape(type="line", x0=avg, x1=avg, y0=i-0.4, y1=i+0.4,
                           line=dict(color="Gray", width=2, dash="dash"))
 
-    # --- NEW: VISUAL FEEDBACK FOR ZEROS ---
     if is_empty:
         fig.add_annotation(
             x=0.5, y=0.5, xref="paper", yref="paper",
@@ -1677,91 +1200,28 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
             showarrow=False, font=dict(size=14, color="gray")
         )
 
+    # --- DYNAMIC RANGE ---
+    max_val = max(max(vals_t1 + vals_t2 + [10]), 15)
+    x_range_max = max_val * 1.15
+
     fig.update_layout(
         barmode='group', 
-        height=350, 
-        margin=dict(l=120, r=60, t=20, b=40), # Increased right margin for labels
-        plot_bgcolor='white', 
+        height=400, 
+        # l=150 for labels, r=180 for a HUGE safety buffer on the right
+        margin=dict(l=150, r=180, t=40, b=40), 
         xaxis=dict(
-            title="Points per Game", 
-            showgrid=True, 
-            gridcolor='#E5E7E9',
-            range=[0, max(max(vals_t1 + vals_t2 + [10]), 15)] # Ensure axis exists even at 0
+            # Keep your existing range logic here
+            showgrid=True, gridcolor='#E5E7E9', griddash='dot',
+            zeroline=True, zerolinecolor='#34495e', zerolinewidth=1.5
         ),
-        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1)
+        yaxis=dict(autorange="reversed", showgrid=False, automargin=True),
+        # x=0.8 pushes the legend further left, away from the paper edge
+        legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=0.8),
+        plot_bgcolor='white'
     )
+
     return fig
-def generate_pdf_report(chart_buf, t1, t2, lg_effic, lg_orb_pct, i1_tot, i1_off, i1_def, i2_tot, i2_off, i2_def, text_t1, text_t2, summary_data=None):
-    pdf = FPDF()
-    pdf.add_page()
-    
-    # Title
-    pdf.set_font("Helvetica", 'B', 16)
-    pdf.cell(0, 10, f"4-Factors Matchup: {t1} vs {t2}", ln=True, align='C')
-    pdf.ln(5)
-    
-    # --- INSERT THE CHART IMAGE ---
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".png") as tmpfile:
-        tmpfile.write(chart_buf.getbuffer())
-        pdf.image(tmpfile.name, x=15, w=180)
-    pdf.ln(5)
-    
-    # 1. Scouting Interpretation Section
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(0, 8, "Scouting Interpretation", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    
-    # Print Headers ONCE outside the loop
-    pdf.set_font("Helvetica", 'B', 9)
-    pdf.cell(90, 6, f"{t1} vs Avg", new_x=XPos.RIGHT, new_y=YPos.TOP)
-    pdf.cell(90, 6, f"{t2} vs Avg", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    
-    # Prepare text
-    pdf.set_font("Helvetica", '', 8)
-    clean_t1 = [s.replace("•", "-") for s in text_t1]
-    clean_t2 = [s.replace("•", "-") for s in text_t2]
-    
-    # Print Rows
-    for t1_str, t2_str in zip(clean_t1, clean_t2):
-        start_y = pdf.get_y()
-        # Left Column
-        pdf.set_xy(10, start_y)
-        pdf.multi_cell(90, 4, t1_str)
-        y_left = pdf.get_y()
-        # Right Column
-        pdf.set_xy(110, start_y) 
-        pdf.multi_cell(90, 4, t2_str)
-        y_right = pdf.get_y()
-        # Sync: move to bottom of the tallest column + padding
-        pdf.set_y(max(y_left, y_right) + 2)
 
-    # 2. Offense vs Defense Breakdown
-    pdf.ln(5)
-    pdf.set_font("Helvetica", 'B', 12)
-    pdf.cell(0, 8, "Offense vs Defense Net Breakdown", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    
-    pdf.set_font("Helvetica", '', 8)
-    factors =["Shooting", "Turnovers", "Rebounding", "Free Throws"]
-    for f in factors:
-        y_row = pdf.get_y()
-        # Use simpler strings to ensure they fit in the 90mm width
-        t1_line = f"{f}: Net {i1_tot[f]:+.1f} | O {i1_off[f]:+.1f} | D {i1_def[f]:+.1f}"
-        t2_line = f"{f}: Net {i2_tot[f]:+.1f} | O {i2_off[f]:+.1f} | D {i2_def[f]:+.1f}"
-        
-        pdf.set_xy(10, y_row)
-        pdf.cell(90, 5, f"{t1_line}")
-        pdf.set_xy(110, y_row)
-        pdf.cell(90, 5, f"{t2_line}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-    # 3. Final Match Summary
-    if summary_data:
-        pdf.ln(5)
-        pdf.set_font("Helvetica", 'B', 12)
-        pdf.cell(0, 8, "Final Match Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.set_font("Helvetica", '', 10)
-        pdf.cell(0, 6, f"Real Score Difference: {summary_data['real_diff']:+}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.cell(0, 6, f"4F Net Points Difference: {summary_data['4f_diff']:+.2f}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-    return bytes(pdf.output(dest='S'))
 # --- MAIN APP ----
 # --- CUSTOM THEMING (THE ULTIMATE VERSION) ---
 st.markdown("""
@@ -2007,55 +1467,6 @@ avg_ftr = lg_data['ftm'] / lg_fga if lg_fga > 0 else 0.25
 avg_orb = lg_orb_pct
 
 st.sidebar.markdown("---")
-
-# --- 4. SYSTEM UTILITIES (Tucked away at the bottom) ---
-with st.sidebar.expander("System & Benchmarks", expanded=False):
-    if st.button("Refresh Data Index"):
-        build_game_index()
-        st.cache_data.clear()
-        st.rerun()
-    
-    st.markdown("---")
-    st.markdown("**League Benchmarks**")
-    col_lg1, col_lg2 = st.columns(2)
-    with col_lg1:
-        st.markdown(f"**Effic:** `{lg_effic:.2f}`")
-    with col_lg2:
-        st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
-    
-    st.markdown("---")
-    with st.expander("Glossary"):
-        st.info(
-            "**Lg. Effic:** Pts per possession.\n\n"
-            "**Lg. OR%:** % of available offensive rebounds grabbed.\n\n"
-            "**2nd Chance Pts:** Pts scored after offensive rebound.\n\n"
-            "**Pts off TO:** Pts scored after opponent turnover.\n\n"
-            "**Fast Break Pts:** Pts scored on a fast break."
-        )
-
-# --- MAIN PAGE BRANDING HEADER ---
-if mode != "Home":
-    config = LEAGUE_CONFIG.get(league, {})
-    logo_filename = config.get("logo", f"{league.lower()}.png") 
-    logo_full_path = os.path.join(LOGOS_PATH, logo_filename)
-    
-    # We increase the first column to 2 to ensure no clipping occurs
-    header_col1, header_col2 = st.columns([2, 5])
-    with header_col1:
-        if os.path.exists(logo_full_path):
-            with open(logo_full_path, "rb") as f:
-                import base64
-                img_base64 = base64.b64encode(f.read()).decode()
-                # Added 'padding: 5px' and 'margin-left: 10px' to push it away from the screen edge
-                st.markdown(
-                    f'<img src="data:image/png;base64,{img_base64}" style="width: 80px; object-fit: contain; display: block; margin-left: 10px; margin-top: 10px; padding: 5px;">', 
-                    unsafe_allow_html=True
-                )
-    with header_col2:
-        st.markdown(f"### {league} | {season} Season")
-    st.markdown("---")
-
-# --- 1. HOME / LANDING PAGE ---
 if mode == "Home":
     st.markdown(f"""
         <div style="text-align: center; padding: 40px 0px;">
@@ -2101,17 +1512,40 @@ if mode == "Home":
 
     # Stop execution here so the Matchup/Display logic doesn't run
     st.stop()
+# --- 4. SYSTEM UTILITIES (Tucked away at the bottom) ---
+with st.sidebar.expander("System & Benchmarks", expanded=False):
+    if st.button("Refresh Data Index"):
+        build_game_index()
+        st.cache_data.clear()
+        st.rerun()
+    
+    st.markdown("---")
+    st.markdown("**League Benchmarks**")
+    col_lg1, col_lg2 = st.columns(2)
+    with col_lg1:
+        st.markdown(f"**Effic:** `{lg_effic:.2f}`")
+    with col_lg2:
+        st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
+    
+    st.markdown("---")
+    with st.expander("Glossary"):
+        st.info(
+            "**Lg. Effic:** Pts per possession.\n\n"
+            "**Lg. OR%:** % of available offensive rebounds grabbed.\n\n"
+            "**2nd Chance Pts:** Pts scored after offensive rebound.\n\n"
+            "**Pts off TO:** Pts scored after opponent turnover.\n\n"
+            "**Fast Break Pts:** Pts scored on a fast break."
+        )
+
 # --- NEW LOGIC FOR TEAM VS LEAGUE ---
-elif mode == "Season Aggregates per Team":
+if mode == "Season Aggregates per Team":
     teams = get_teams_in_league(league, season)
     t1 = st.sidebar.selectbox("Select Team", teams, index=0, key="t1_agg")
-    # --- ADD THIS LINE HERE ---
     # We get the max games from the team stats so the slider range is dynamic
     t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
     max_gp_possible = int(t1_off.get('gp', 1))
     t2 = "League Average"
     
-    t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
     t1_def = get_per_game_volumes(t1, league, season, "Rival")
     t2_off, t2_def = lg_data.copy(), lg_data.copy()
     
@@ -2125,16 +1559,18 @@ elif mode == "Season Aggregates per Team":
     i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (lg_raw, lg_raw)
     
     header_title = f"Team Profile: {t1}"
+    pass
 
 # --- 2. MODE: HEAD TO HEAD MATCHUP (Team A vs Team B Sum) ---
 elif mode == "Head to Head Matchup":
     teams = get_teams_in_league(league, season)
     t1 = st.sidebar.selectbox("Home Team", teams, index=0, key="t1_h2h")
     t2 = st.sidebar.selectbox("Away Team", teams, index=min(1, len(teams)-1), key="t2_h2h")
-      # 1. PEFORM THE INDEX CHECK FIRST
+    # 1. PEFORM THE INDEX CHECK FIRST
     # We call get_h2h_stats, but we need to know if it actually found games
     t1_sum, t2_sum = get_h2h_stats(t1, t2, league, season)
     n_games = t1_sum.get('gp', 0) # Use 0 as default if not found
+
 
     # --- THE GLOBAL WARNING ---
     if n_games == 0:
@@ -2467,15 +1903,6 @@ elif mode == "Team Performance by Game":
 
                 st.dataframe(styler_p, use_container_width=True, hide_index=True, column_config={"Opp_Logo": st.column_config.ImageColumn("Opp", width="small")})
 
-    # --- PDF BUTTON (Placed OUTSIDE the tabs so it is always visible) ---
-    st.markdown("---")
-    st.download_button(
-        "Download PDF Report",
-        generate_performance_pdf(perf_df, target_team, league, season, view_type, analysis_type),
-        f"Scout_{target_team}.pdf",
-        key="btn_performance_scout"
-    )
-    st.stop()
 elif mode == "Overall League Standings":
     # 1. Phase Selection
     phases_in_index = sorted(df_league['phase'].unique())
@@ -2666,39 +2093,6 @@ elif mode == "Overall League Standings":
                 
                 # USING YOUR ORIGINAL RENDERER (It handles the Classic columns perfectly!)
                 display_player_table(df_leaderboard.head(50), "League Leaderboard", exp_ld_offdef, exp_ld_shoot)
-
-    # --- THE PDF BUTTON ---
-    st.markdown("---")
-    col_pdf1, col_pdf2, col_pdf3 = st.columns([1, 1, 1])
-    with col_pdf1:
-        pdf_leaderboard_data = None
-        if show_player_standings:
-            # Apply the same data fork for the PDF generation!
-            if analysis_type == "4-Factors Net Points":
-                pdf_leaderboard_data = get_league_player_leaderboard(league, season, selected_phase)
-            else:
-                pdf_leaderboard_data = get_league_player_leaderboard_classic_v4(league, season, selected_phase)
-                
-            # Apply the same safety filter for the PDF
-            if pdf_leaderboard_data is not None and not pdf_leaderboard_data.empty:
-                pdf_leaderboard_data = pdf_leaderboard_data[pdf_leaderboard_data['Team_Name'].isin(teams_to_analyze)]
-
-        st.download_button(
-            label="Download Standings PDF", 
-            data=generate_standings_pdf(
-                standings_df, 
-                league, 
-                season, 
-                selected_phase, 
-                analysis_type, 
-                pdf_leaderboard_data
-            ), 
-            file_name=f"Standings_{selected_phase}.pdf",
-            mime="application/pdf",
-            key="btn_league_standings_final" 
-        )
-
-    st.stop()
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
     df_f = df_league[df_league['season'] == season].copy()
@@ -2728,7 +2122,8 @@ else:
 # --- DISPLAY ---
 # Ensure we only try to render this if we are in a mode that defines matchup variables
 if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"]:
-    # 1. Icons and Header (Your original code)
+    
+    # 1. Icons and Header (Slightly indented)
     t1_icon = get_team_icon(t1, league)
     t2_icon = get_team_icon(t2, league)
 
@@ -2746,7 +2141,8 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
     <hr style="margin-top: 5px; margin-bottom: 25px; border: 0; border-top: 1px solid #eee;">
     """
     st.markdown(header_html, unsafe_allow_html=True)
-    # --- NEW: H2H GAME SUMMARY (Appears for both Team and Player views) ---
+
+    # --- H2H GAME SUMMARY ---
     if mode == "Head to Head Matchup":
         mask_h2h = (
             (df_index['league'] == league) & 
@@ -2759,166 +2155,163 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
         h2h_games_list = df_index[mask_h2h].sort_values('round')
 
         if not h2h_games_list.empty:
-            # We use a compact display so it doesn't take too much vertical space
             game_strings = []
             for _, row in h2h_games_list.iterrows():
                 game_strings.append(f"**{row['round']}**: {row['t1']} {row['pts1']}-{row['pts2']} {row['t2']}")
             
-            # Displaying it in a nice container above the tabs
             with st.container():
                 st.markdown(f"**Games included in this H2H aggregate:**")
-                # Join with a bullet point for better readability
                 st.write(" • " + " | ".join(game_strings))
                 st.markdown("---")
 
-    # --- NEW: TAB SYSTEM ---
-tab_team, tab_players = st.tabs(["Team Comparison", "Player Impact"])
+    # --- TAB SYSTEM (Now correctly indented inside the IF block) ---
+    tab_team, tab_players = st.tabs(["Team Comparison", "Player Impact"])
 
-with tab_team:
-    # 1. Handle NET POINTS Analysis
-    if analysis_type == "4-Factors Net Points":
-        if mode == "Head to Head Matchup" or mode == "Games Boxscores":
-            st.markdown("#### Matchup Bottom Line (Net Points)")
-            t1_total_net = sum(i1_tot.values())
-            t2_total_net = sum(i2_tot.values())
-            diff = t1_total_net - t2_total_net
-            winner = t1 if diff > 0 else t2
-            winning_stats = i1_tot if diff > 0 else i2_tot
-            best_factor = max(winning_stats, key=winning_stats.get)
-
-            m_col1, m_col2, m_col3, m_col4 = st.columns(4)
-            with m_col1: st.metric(label=f"{t1} Total Edge", value=f"{t1_total_net:+.2f} pts")
-            with m_col2: st.metric(label=f"{t2} Total Edge", value=f"{t2_total_net:+.2f} pts")
-            with m_col3: st.metric(label="Overall Advantage", value=f"{abs(diff):+.2f} pts", delta=winner)
-            with m_col4: st.metric(label="Key Driver", value=best_factor)
-            st.markdown("---")
-
-        elif mode == "Season Aggregates per Team":
-            st.markdown("#### Team vs League Baseline (Net Points)")
-            t1_total_net = sum(i1_tot.values())
-            best_factor = max(i1_tot, key=i1_tot.get)
-            worst_factor = min(i1_tot, key=i1_tot.get)
-
-            m_col1, m_col2, m_col3 = st.columns(3)
-            with m_col1: st.metric(label=f"{t1} Net Impact", value=f"{t1_total_net:+.2f} pts")
-            with m_col2: st.metric(label="Strongest Area", value=best_factor, delta=f"{i1_tot[best_factor]:+.2f}")
-            with m_col3: st.metric(label="Biggest Liability", value=worst_factor, delta=f"{i1_tot[worst_factor]:+.2f}", delta_color="inverse")
-            st.markdown("---")
-    else:
-        # Handle CLASSIC Analysis (Situational Points)
-        if mode == "Head to Head Matchup" or mode == "Games Boxscores":
-            st.markdown("#### Situational Scoring Edge")
-            if mode == "Games Boxscores": s1_sum, s2_sum = g['t1_stats'], g['t2_stats']
-            else: s1_sum, s2_sum = t1_h2h_avg, t2_h2h_avg
-            
-            t1_sit_total = s1_sum.get('pts_off_to', 0) + s1_sum.get('pts_2nd_ch', 0) + s1_sum.get('pts_fb', 0)
-            t2_sit_total = s2_sum.get('pts_off_to', 0) + s2_sum.get('pts_2nd_ch', 0) + s2_sum.get('pts_fb', 0)
-            sit_diff = t1_sit_total - t2_sit_total
-            sit_winner = t1 if sit_diff > 0 else t2
-
-            m_col1, m_col2, m_col3 = st.columns(3)
-            with m_col1: st.metric(label=f"{t1} Sit. Pts", value=f"{t1_sit_total:.1f}")
-            with m_col2: st.metric(label=f"{t2} Sit. Pts", value=f"{t2_sit_total:.1f}")
-            with m_col3: st.metric(label="Sit. Advantage", value=f"{abs(sit_diff):+.1f} pts", delta=sit_winner)
-            st.markdown("---")
-
-        elif mode == "Season Aggregates per Team":
-            st.markdown("#### Situational Profile vs League")
-            t1_sit_total = t1_off.get('pts_off_to', 0) + t1_off.get('pts_2nd_ch', 0) + t1_off.get('pts_fb', 0)
-            lg_sit_total = lg_data.get('pts_off_to', 0) + lg_data.get('pts_2nd_ch', 0) + lg_data.get('pts_fb', 0)
-
-            m_col1, m_col2 = st.columns(2)
-            with m_col1: st.metric(label=f"{t1} Avg Sit. Pts", value=f"{t1_sit_total:.1f}")
-            with m_col2: st.metric(label="vs League Avg", value=f"{t1_sit_total - lg_sit_total:+.1f}", delta="Elite" if t1_sit_total > lg_sit_total else "Below Avg")
-            st.markdown("---")
-
-    with st.container(border=True):
+    with tab_team:
         if analysis_type == "4-Factors Net Points":
-            st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True, key=f"chart_4f_final_{t1}_{t2}")
+            if mode == "Head to Head Matchup" or mode == "Games Boxscores":
+                st.markdown("#### Matchup Bottom Line (Net Points)")
+                t1_total_net = sum(i1_tot.values())
+                t2_total_net = sum(i2_tot.values())
+                diff = t1_total_net - t2_total_net
+                winner = t1 if diff > 0 else t2
+                winning_stats = i1_tot if diff > 0 else i2_tot
+                best_factor = max(winning_stats, key=winning_stats.get)
+
+                m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                with m_col1: st.metric(label=f"{t1} Total Edge", value=f"{t1_total_net:+.2f} pts")
+                with m_col2: st.metric(label=f"{t2} Total Edge", value=f"{t2_total_net:+.2f} pts")
+                with m_col3: st.metric(label="Overall Advantage", value=f"{abs(diff):+.2f} pts", delta=winner)
+                with m_col4: st.metric(label="Key Driver", value=best_factor)
+                st.markdown("---")
+
+            elif mode == "Season Aggregates per Team":
+                st.markdown("#### Team vs League Baseline (Net Points)")
+                t1_total_net = sum(i1_tot.values())
+                best_factor = max(i1_tot, key=i1_tot.get)
+                worst_factor = min(i1_tot, key=i1_tot.get)
+
+                m_col1, m_col2, m_col3 = st.columns(3)
+                with m_col1: st.metric(label=f"{t1} Net Impact", value=f"{t1_total_net:+.2f} pts")
+                with m_col2: st.metric(label="Strongest Area", value=best_factor, delta=f"{i1_tot[best_factor]:+.2f}")
+                with m_col3: st.metric(label="Biggest Liability", value=worst_factor, delta=f"{i1_tot[worst_factor]:+.2f}")
+                st.markdown("---")
         else:
-            if mode == "Games Boxscores": s1_plot, s2_plot = g['t1_stats'], g['t2_stats']
-            elif mode == "Head to Head Matchup": s1_plot, s2_plot = t1_h2h_avg, t2_h2h_avg
-            else: s1_plot, s2_plot = t1_off, t2_off
+            # Handle CLASSIC Analysis
+            if mode == "Head to Head Matchup" or mode == "Games Boxscores":
+                st.markdown("#### Situational Scoring Edge")
+                if mode == "Games Boxscores": s1_sum, s2_sum = g['t1_stats'], g['t2_stats']
+                else: s1_sum, s2_sum = t1_h2h_avg, t2_h2h_avg
+            
+                t1_sit_total = s1_sum.get('pts_off_to', 0) + s1_sum.get('pts_2nd_ch', 0) + s1_sum.get('pts_fb', 0)
+                t2_sit_total = s2_sum.get('pts_off_to', 0) + s2_sum.get('pts_2nd_ch', 0) + s2_sum.get('pts_fb', 0)
+                sit_diff = t1_sit_total - t2_sit_total
+                sit_winner = t1 if sit_diff > 0 else t2
 
-            st.plotly_chart(plot_situational_comparison(s1_plot, s2_plot, t1, t2, lg_data), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
+                m_col1, m_col2, m_col3 = st.columns(3)
+                with m_col1: st.metric(label=f"{t1} Sit. Pts", value=f"{t1_sit_total:.1f}")
+                with m_col2: st.metric(label=f"{t2} Sit. Pts", value=f"{t2_sit_total:.1f}")
+                with m_col3: st.metric(label="Sit. Advantage", value=f"{abs(sit_diff):+.1f} pts", delta=sit_winner)
+                st.markdown("---")
 
-            st.markdown("### Four Factors (%) Comparison")
-            p1 = get_4f_percentages(s1_plot, s2_plot)
-            p2 = get_4f_percentages(s2_plot, s1_plot)
-            st.table(pd.DataFrame([p1, p2], index=[t1, t2]))
+            elif mode == "Season Aggregates per Team":
+                st.markdown("#### Situational Profile vs League")
+                t1_sit_total = t1_off.get('pts_off_to', 0) + t1_off.get('pts_2nd_ch', 0) + t1_off.get('pts_fb', 0)
+                lg_sit_total = lg_data.get('pts_off_to', 0) + lg_data.get('pts_2nd_ch', 0) + lg_data.get('pts_fb', 0)
+                sit_diff = t1_sit_total - lg_sit_total
+                # Categorize into 4 tiers (You can adjust the 4.0 threshold if you prefer)
+                if sit_diff >= 4.0:
+                    tier_tag = "Elite"
+                elif sit_diff >= 0:
+                    tier_tag = "Above Avg"
+                elif sit_diff >= -4.0:
+                    tier_tag = "- Below Avg"   # The minus sign forces Streamlit to color it Red with a Down arrow
+                else:
+                    tier_tag = "- Bottom Tier" # The minus sign forces Streamlit to color it Red with a Down arrow
 
+                m_col1, m_col2 = st.columns(2)
+                with m_col1: st.metric(label=f"{t1} Avg Sit. Pts", value=f"{t1_sit_total:.1f}")
+                with m_col2: st.metric(label="vs League Avg", value=f"{t1_sit_total - lg_sit_total:+.1f}", delta=tier_tag)
+                st.markdown("---")
 
-with tab_players:
-    if analysis_type == "4-Factors Net Points":
-        col_ctrl1, col_ctrl2 = st.columns(2)
-        with col_ctrl1: expand_off_def = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_match")
-        with col_ctrl2: expand_shooting = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_match")
-    else:
-        expand_off_def, expand_shooting = False, False
+        with st.container(border=True):
+            if analysis_type == "4-Factors Net Points":
+                st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True, key=f"chart_4f_final_{t1}_{t2}")
+            else:
+                if mode == "Games Boxscores": s1_plot, s2_plot = g['t1_stats'], g['t2_stats']
+                elif mode == "Head to Head Matchup": s1_plot, s2_plot = t1_h2h_avg, t2_h2h_avg
+                else: s1_plot, s2_plot = t1_off, t2_off
+                st.plotly_chart(plot_situational_comparison(s1_plot, s2_plot, t1, t2, lg_data), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
+                st.markdown("### Four Factors (%) Comparison")
+                p1 = get_4f_percentages(s1_plot, s2_plot)
+                p2 = get_4f_percentages(s2_plot, s1_plot)
+                st.table(pd.DataFrame([p1, p2], index=[t1, t2]))
 
-    st.markdown("---")
+    with tab_players:
+        if analysis_type == "4-Factors Net Points":
+            col_ctrl1, col_ctrl2 = st.columns(2)
+            with col_ctrl1: expand_off_def = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_match")
+            with col_ctrl2: expand_shooting = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_match")
+        else:
+            expand_off_def, expand_shooting = False, False
 
-    min_gp_filter = 1
-    if mode in ["Season Aggregates per Team", "Head to Head Matchup"]:
-        t1_off_stats = get_per_game_volumes(t1, league, season, "TOTAL")
-        max_gp_possible = int(t1_off_stats.get('gp', 1))
-        if max_gp_possible > 1:
-            col_gp1, col_gp2 = st.columns([1, 3])
-            with col_gp1:
-                min_gp_filter = st.slider("Min. Games Played", 1, max_gp_possible, 1, help="Filter out players with very few games.", key="min_gp_slider")
-            with col_gp2: st.markdown("<br>", unsafe_allow_html=True)
-
-    def apply_gp_filter(df, target_min):
-        if df is None or df.empty: return df
+        st.markdown("---")
+        min_gp_filter = 1
         if mode in ["Season Aggregates per Team", "Head to Head Matchup"]:
+            t1_off_stats = get_per_game_volumes(t1, league, season, "TOTAL")
+            max_gp_possible = int(t1_off_stats.get('gp', 1))
+            if max_gp_possible > 1:
+                col_gp1, col_gp2 = st.columns([1, 3])
+                with col_gp1:
+                    min_gp_filter = st.slider("Min. Games Played", 1, max_gp_possible, 1, key="min_gp_slider")
+                with col_gp2: st.markdown("<br>", unsafe_allow_html=True)
+
+        def apply_gp_filter(df, target_min):
+            if df is None or df.empty: return df
             gp_col = next((c for c in df.columns if c.upper() == 'GP'), None)
             if gp_col:
                 df[gp_col] = pd.to_numeric(df[gp_col], errors='coerce').fillna(0)
                 p_col = next((c for c in df.columns if c.upper() == 'PLAYER'), 'Player')
                 mask = (df[gp_col] >= target_min) | (df[p_col].str.contains('TEAM|EQUIP|TOTAL|--- TOTAL ---', case=False, na=False))
                 return df[mask].copy()
-        return df
+            return df
 
-    is_h2h = t2 != "League Average"
-    if is_h2h:
-        p_tabs = st.tabs([f"{t1}", f"{t2}"])
-
-        with p_tabs[0]:
+        is_h2h = t2 != "League Average"
+        if is_h2h:
+            p_tabs = st.tabs([f"{t1}", f"{t2}"])
+            with p_tabs[0]:
+                if analysis_type == "4-Factors Net Points":
+                    if mode == "Games Boxscores": df_p1 = load_single_game_individual(game_record['path'], t1)
+                    elif mode == "Head to Head Matchup": df_p1 = load_h2h_individual_data(t1, t2, league, season)
+                    else: df_p1 = load_individual_aggregate(t1, league, season, phase if 'phase' in locals() else None)
+                else:
+                    if mode == "Games Boxscores": df_p1 = load_single_game_classic_individual(game_record['path'], t1)
+                    elif mode == "Head to Head Matchup": df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None, opponent_team=t2)
+                    else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None)
+                df_p1_f = apply_gp_filter(df_p1, min_gp_filter)
+                display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting)
+            with p_tabs[1]:
+                if analysis_type == "4-Factors Net Points":
+                    if mode == "Games Boxscores": df_p2 = load_single_game_individual(game_record['path'], t2)
+                    elif mode == "Head to Head Matchup": df_p2 = load_h2h_individual_data(t2, t1, league, season)
+                    else: df_p2 = load_individual_aggregate(t2, league, season, phase if 'phase' in locals() else None)
+                else:
+                    if mode == "Games Boxscores": df_p2 = load_single_game_classic_individual(game_record['path'], t2)
+                    elif mode == "Head to Head Matchup": df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None, opponent_team=t1)
+                    else: df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None)
+                df_p2_f = apply_gp_filter(df_p2, min_gp_filter)
+                display_player_table(df_p2_f, f"{t2} Individual Stats", expand_off_def, expand_shooting)
+        else:
+            c_phase = phase if 'phase' in locals() else None
             if analysis_type == "4-Factors Net Points":
                 if mode == "Games Boxscores": df_p1 = load_single_game_individual(game_record['path'], t1)
-                elif mode == "Head to Head Matchup": df_p1 = load_h2h_individual_data(t1, t2, league, season)
-                else: df_p1 = load_individual_aggregate(t1, league, season, phase if 'phase' in locals() else None)
+                else: df_p1 = load_individual_aggregate(t1, league, season, c_phase)
             else:
                 if mode == "Games Boxscores": df_p1 = load_single_game_classic_individual(game_record['path'], t1)
-                elif mode == "Head to Head Matchup": df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None, opponent_team=t2)
-                else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None)
-
+                else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, c_phase)
             df_p1_f = apply_gp_filter(df_p1, min_gp_filter)
             display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting)
 
-        with p_tabs[1]:
-            if analysis_type == "4-Factors Net Points":
-                if mode == "Games Boxscores": df_p2 = load_single_game_individual(game_record['path'], t2)
-                elif mode == "Head to Head Matchup": df_p2 = load_h2h_individual_data(t2, t1, league, season)
-                else: df_p2 = load_individual_aggregate(t2, league, season, phase if 'phase' in locals() else None)
-            else:
-                if mode == "Games Boxscores": df_p2 = load_single_game_classic_individual(game_record['path'], t2)
-                elif mode == "Head to Head Matchup": df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None, opponent_team=t1)
-                else: df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None)
-
-            df_p2_f = apply_gp_filter(df_p2, min_gp_filter)
-            display_player_table(df_p2_f, f"{t2} Individual Stats", expand_off_def, expand_shooting)
-    else:
-        c_phase = phase if 'phase' in locals() else None
-        if analysis_type == "4-Factors Net Points":
-            if mode == "Games Boxscores": df_p1 = load_single_game_individual(game_record['path'], t1)
-            else: df_p1 = load_individual_aggregate(t1, league, season, c_phase)
-        else:
-            if mode == "Games Boxscores": df_p1 = load_single_game_classic_individual(game_record['path'], t1)
-            else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, c_phase)
-
-        df_p1_f = apply_gp_filter(df_p1, min_gp_filter)
-        display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting)
 
 # --- GLOSSARY / INTERPRETATION ---
 if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"] and analysis_type == "4-Factors Net Points":
@@ -2996,396 +2389,43 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
                 st.write(f"### {t2} (Away)")
                 for f in factors: 
                     st.markdown(f"**{f} Net: {i2_tot[f]:+.2f}** | Off: {i2_raw[0][f]:+.2f} | Def: {i2_raw[1][f]:+.2f}")
-# --- MASTER PDF EXPORT SECTION ---
+# --- GLOBAL EXPORT TOOL (At the very end of the script) ---
 st.markdown("---")
-if st.button("Generate PDF Report", key="master_pdf_btn"):
-    
-    # --- INITIALIZE VARIABLES (Prevents NameErrors) ---
-    pdf_p1, pdf_p2 = None, None
-    n_games_pdf = 1 
-    
-    # A. Determine Team Stats for the first page
-    if mode == "Games Boxscores":
-        s1, s2 = g['t1_stats'], g['t2_stats']
-    else:
-        # Re-fetch averages if they are somehow missing from memory
-        if t1_off is None:
-            if mode == "Head to Head Matchup":
-                s1, s2 = get_h2h_stats(t1, t2, league, season)
-            else:
-                s1 = get_per_game_volumes(t1, league, season, "TOTAL")
-                s2 = get_per_game_volumes(t2, league, season, "TOTAL")
-        else:
-            s1, s2 = t1_off, t2_off
-    
-    # B. Prepare the Team Table rows AND the Chart Buffer
-    if analysis_type == "4-Factors Net Points":
-        # Create the 4-Factors horizontal bar chart
-        chart_buf = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
-        table_rows = [
-            ("Shooting Net", f"{i1_tot['Shooting']:+.2f}", f"{i2_tot['Shooting']:+.2f}"),
-            ("Turnovers Net", f"{i1_tot['Turnovers']:+.2f}", f"{i2_tot['Turnovers']:+.2f}"),
-            ("Rebounding Net", f"{i1_tot['Rebounding']:+.2f}", f"{i2_tot['Rebounding']:+.2f}"),
-            ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}"),
-            ("TOTAL 4F IMPACT", f"{sum(i1_tot.values()):+.2f}", f"{sum(i2_tot.values()):+.2f}")
-        ]
-    else:
-        # --- THE FIX FOR THE NAME ERROR ---
-        # 1. Create the Situational chart (Pts off TO, etc.) for the PDF
-        # Note: we use the s1 and s2 stats identified in Section A
-        chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2, lg_data)
-        
-        # 2. Define the table rows for the Classic/Situational mode
-        table_rows = [
-            ("Pts off TO", f"{s1.get('pts_off_to', 0):.1f}", f"{s2.get('pts_off_to', 0):.1f}"),
-            ("2nd Chance", f"{s1.get('pts_2nd_ch', 0):.1f}", f"{s2.get('pts_2nd_ch', 0):.1f}"),
-            ("Fast Break", f"{s1.get('pts_fb', 0):.1f}", f"{s2.get('pts_fb', 0):.1f}")
-        ]
-    # C. Load Player Data
-        if mode == "Games Boxscores":
-            if analysis_type == "4-Factors Net Points":
-                pdf_p1 = load_single_game_individual(game_record['path'], t1)
-                pdf_p2 = load_single_game_individual(game_record['path'], t2)
-            else:
-                pdf_p1 = load_single_game_classic_individual(game_record['path'], t1)
-                pdf_p2 = load_single_game_classic_individual(game_record['path'], t2)
-            n_games_pdf = 1
+inject_print_engine() 
 
-        elif mode == "Head to Head Matchup":
-            mask_h2h = (
-                (df_index['league'] == league) &
-                (df_index['season'] == season) &
-                (
-                    ((df_index['t1'] == t1) & (df_index['t2'] == t2)) |
-                    ((df_index['t1'] == t2) & (df_index['t2'] == t1))
-                )
-            )
-            n_games_pdf = len(df_index[mask_h2h])
-
-            if analysis_type == "4-Factors Net Points":
-                pdf_p1 = load_h2h_individual_data(t1, t2, league, season)
-                pdf_p2 = load_h2h_individual_data(t2, t1, league, season)
-            else:
-                pdf_p1 = load_h2h_classic_individual_data(t1, t2, league, season)
-                pdf_p2 = load_h2h_classic_individual_data(t2, t1, league, season)
-
-        else: # Season Aggregates
-            c_phase = phase if 'phase' in locals() else None
-            if analysis_type == "4-Factors Net Points":
-                pdf_p1 = load_individual_aggregate(t1, league, season, c_phase)
-                pdf_p2 = load_individual_aggregate(t2, league, season, c_phase)
-            else:
-                pdf_p1 = load_individual_aggregate_classic(t1, league, season, c_phase)
-                pdf_p2 = load_individual_aggregate_classic(t2, league, season, c_phase)
-            team_stats_for_gp = get_per_game_volumes(t1, league, season)
-            n_games_pdf = team_stats_for_gp.get('gp', 1)
-
-    # D. Determine Subtitle safely
-    if mode == "Season Aggregates per Team":
-        sub = f"{season} Team Profile"
-    elif mode == "Head to Head Matchup":
-        sub = f"{season} H2H Aggregate ({n_games_pdf} Games)"
-    elif mode == "Games Boxscores":
-        sub = f"{game_record['round']} Boxscore"
-    else:
-        sub = f"{season} Scouting Report"
-
-    # E. Generate and Download
-    # All variables (pdf_p1, pdf_p2, n_games_pdf) are now guaranteed to exist!
-    pdf_bytes = generate_unified_report(
-        chart_buf, t1, t2, analysis_type, sub, table_rows, 
-        pdf_p1, pdf_p2, n_games=n_games_pdf
+col_p1, col_p2, col_p3 = st.columns([1, 2, 1])
+with col_p2:
+    # We use a standard HTML button inside the component to trigger the print.
+    # This is often more reliable than an automatic script.
+    st.components.v1.html(
+        """
+        <html>
+            <head>
+                <style>
+                    .print-btn {
+                        background-color: #FF4B4B;
+                        color: white;
+                        border: none;
+                        padding: 12px 24px;
+                        border-radius: 8px;
+                        cursor: pointer;
+                        font-family: sans-serif;
+                        font-weight: bold;
+                        width: 100%;
+                        font-size: 16px;
+                    }
+                    .print-btn:hover {
+                        background-color: #ff3333;
+                    }
+                </style>
+            </head>
+            <body>
+                <button class="print-btn" onclick="window.parent.print()">
+                    Export View to PDF / Print (Use Print to PDF in browser, and make sure to set horizontal)
+                </button>
+            </body>
+        </html>
+        """,
+        height=70,
     )
-    
-    st.download_button(
-        label="Download PDF Report",
-        data=pdf_bytes,
-        file_name=f"Report_{t1}_{t2}.pdf",
-        mime="application/pdf",
-        key="btn_master_matchup_report"
-    )
-    
-    # --- INITIALIZE VARIABLES (Prevents NameErrors) ---
-    pdf_p1, pdf_p2 = None, None
-    n_games_pdf = 1 
-    
-    # A. Determine Team Stats for the first page
-    if mode == "Games Boxscores":
-        s1, s2 = g['t1_stats'], g['t2_stats']
-    else:
-        # Re-fetch averages if they are somehow missing from memory
-        if t1_off is None:
-            if mode == "Head to Head Matchup":
-                s1, s2 = get_h2h_stats(t1, t2, league, season)
-            else:
-                s1 = get_per_game_volumes(t1, league, season, "TOTAL")
-                s2 = get_per_game_volumes(t2, league, season, "TOTAL")
-        else:
-            s1, s2 = t1_off, t2_off
-    
-    # B. Prepare the Team Table rows AND the Chart Buffer
-    if analysis_type == "4-Factors Net Points":
-        # Create the 4-Factors horizontal bar chart
-        chart_buf = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
-        table_rows = [
-            ("Shooting Net", f"{i1_tot['Shooting']:+.2f}", f"{i2_tot['Shooting']:+.2f}"),
-            ("Turnovers Net", f"{i1_tot['Turnovers']:+.2f}", f"{i2_tot['Turnovers']:+.2f}"),
-            ("Rebounding Net", f"{i1_tot['Rebounding']:+.2f}", f"{i2_tot['Rebounding']:+.2f}"),
-            ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}"),
-            ("TOTAL 4F IMPACT", f"{sum(i1_tot.values()):+.2f}", f"{sum(i2_tot.values()):+.2f}")
-        ]
-    else:
-        # --- THE FIX FOR THE NAME ERROR ---
-        # 1. Create the Situational chart (Pts off TO, etc.) for the PDF
-        # Note: we use the s1 and s2 stats identified in Section A
-        chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2, lg_data)
-        
-        # 2. Define the table rows for the Classic/Situational mode
-        table_rows = [
-            ("Pts off TO", f"{s1.get('pts_off_to', 0):.1f}", f"{s2.get('pts_off_to', 0):.1f}"),
-            ("2nd Chance", f"{s1.get('pts_2nd_ch', 0):.1f}", f"{s2.get('pts_2nd_ch', 0):.1f}"),
-            ("Fast Break", f"{s1.get('pts_fb', 0):.1f}", f"{s2.get('pts_fb', 0):.1f}")
-        ]
-    # C. Load Player Data (Only for Net Points mode)
-    if analysis_type == "4-Factors Net Points":
-        if mode == "Games Boxscores":
-            pdf_p1 = load_single_game_individual(game_record['path'], t1)
-            pdf_p2 = load_single_game_individual(game_record['path'], t2)
-            n_games_pdf = 1
-        
-        elif mode == "Head to Head Matchup":
-            # This counts how many games were found in the index for this rivalry
-            mask_h2h = (
-                (df_index['league'] == league) & 
-                (df_index['season'] == season) & 
-                (
-                    ((df_index['t1'] == t1) & (df_index['t2'] == t2)) |
-                    ((df_index['t1'] == t2) & (df_index['t2'] == t1))
-                )
-            )
-            n_games_pdf = len(df_index[mask_h2h]) # This must be passed to Section E
-            
-            pdf_p1 = load_h2h_individual_data(t1, t2, league, season)
-            pdf_p2 = load_h2h_individual_data(t2, t1, league, season)
-        
-        else: # Season Aggregates
-            c_phase = phase if 'phase' in locals() else None
-            pdf_p1 = load_individual_aggregate(t1, league, season, c_phase)
-            pdf_p2 = load_individual_aggregate(t2, league, season, c_phase)
-            team_stats_for_gp = get_per_game_volumes(t1, league, season)
-            n_games_pdf = team_stats_for_gp.get('gp', 1)
-
-    # D. Determine Subtitle safely
-    if mode == "Season Aggregates per Team":
-        sub = f"{season} Team Profile"
-    elif mode == "Head to Head Matchup":
-        sub = f"{season} H2H Aggregate ({n_games_pdf} Games)"
-    elif mode == "Games Boxscores":
-        sub = f"{game_record['round']} Boxscore"
-    else:
-        sub = f"{season} Scouting Report"
-
-    # E. Generate and Download
-    # All variables (pdf_p1, pdf_p2, n_games_pdf) are now guaranteed to exist!
-    pdf_bytes = generate_unified_report(
-        chart_buf, t1, t2, analysis_type, sub, table_rows, 
-        pdf_p1, pdf_p2, n_games=n_games_pdf
-    )
-    
-    st.download_button(
-        label="Download PDF Report",
-        data=pdf_bytes,
-        file_name=f"Report_{t1}_{t2}.pdf",
-        mime="application/pdf",
-        key="btn_master_matchup_report"
-    )
-    
-    # --- INITIALIZE VARIABLES (Prevents NameErrors) ---
-    pdf_p1, pdf_p2 = None, None
-    n_games_pdf = 1 
-    
-    # A. Determine Team Stats for the first page
-    if mode == "Games Boxscores":
-        s1, s2 = g['t1_stats'], g['t2_stats']
-    else:
-        # Re-fetch averages if they are somehow missing from memory
-        if t1_off is None:
-            if mode == "Head to Head Matchup":
-                s1, s2 = get_h2h_stats(t1, t2, league, season)
-            else:
-                s1 = get_per_game_volumes(t1, league, season, "TOTAL")
-                s2 = get_per_game_volumes(t2, league, season, "TOTAL")
-        else:
-            s1, s2 = t1_off, t2_off
-    
-    # B. Prepare the Team Table rows AND the Chart Buffer
-    if analysis_type == "4-Factors Net Points":
-        # Create the 4-Factors horizontal bar chart
-        chart_buf = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
-        table_rows = [
-            ("Shooting Net", f"{i1_tot['Shooting']:+.2f}", f"{i2_tot['Shooting']:+.2f}"),
-            ("Turnovers Net", f"{i1_tot['Turnovers']:+.2f}", f"{i2_tot['Turnovers']:+.2f}"),
-            ("Rebounding Net", f"{i1_tot['Rebounding']:+.2f}", f"{i2_tot['Rebounding']:+.2f}"),
-            ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}"),
-            ("TOTAL 4F IMPACT", f"{sum(i1_tot.values()):+.2f}", f"{sum(i2_tot.values()):+.2f}")
-        ]
-    else:
-        # --- THE FIX FOR THE NAME ERROR ---
-        # 1. Create the Situational chart (Pts off TO, etc.) for the PDF
-        # Note: we use the s1 and s2 stats identified in Section A
-        chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2, lg_data)
-        
-        # 2. Define the table rows for the Classic/Situational mode
-        table_rows = [
-            ("Pts off TO", f"{s1.get('pts_off_to', 0):.1f}", f"{s2.get('pts_off_to', 0):.1f}"),
-            ("2nd Chance", f"{s1.get('pts_2nd_ch', 0):.1f}", f"{s2.get('pts_2nd_ch', 0):.1f}"),
-            ("Fast Break", f"{s1.get('pts_fb', 0):.1f}", f"{s2.get('pts_fb', 0):.1f}")
-        ]
-    # C. Load Player Data (Only for Net Points mode)
-    if analysis_type == "4-Factors Net Points":
-        if mode == "Games Boxscores":
-            pdf_p1 = load_single_game_individual(game_record['path'], t1)
-            pdf_p2 = load_single_game_individual(game_record['path'], t2)
-            n_games_pdf = 1
-        
-        elif mode == "Head to Head Matchup":
-            # This counts how many games were found in the index for this rivalry
-            mask_h2h = (
-                (df_index['league'] == league) & 
-                (df_index['season'] == season) & 
-                (
-                    ((df_index['t1'] == t1) & (df_index['t2'] == t2)) |
-                    ((df_index['t1'] == t2) & (df_index['t2'] == t1))
-                )
-            )
-            n_games_pdf = len(df_index[mask_h2h]) # This must be passed to Section E
-            
-            pdf_p1 = load_h2h_individual_data(t1, t2, league, season)
-            pdf_p2 = load_h2h_individual_data(t2, t1, league, season)
-        
-        else: # Season Aggregates
-            c_phase = phase if 'phase' in locals() else None
-            pdf_p1 = load_individual_aggregate(t1, league, season, c_phase)
-            pdf_p2 = load_individual_aggregate(t2, league, season, c_phase)
-            team_stats_for_gp = get_per_game_volumes(t1, league, season)
-            n_games_pdf = team_stats_for_gp.get('gp', 1)
-
-    # D. Determine Subtitle safely
-    if mode == "Season Aggregates per Team":
-        sub = f"{season} Team Profile"
-    elif mode == "Head to Head Matchup":
-        sub = f"{season} H2H Aggregate ({n_games_pdf} Games)"
-    elif mode == "Games Boxscores":
-        sub = f"{game_record['round']} Boxscore"
-    else:
-        sub = f"{season} Scouting Report"
-
-    # E. Generate and Download
-    # All variables (pdf_p1, pdf_p2, n_games_pdf) are now guaranteed to exist!
-    pdf_bytes = generate_unified_report(
-        chart_buf, t1, t2, analysis_type, sub, table_rows, 
-        pdf_p1, pdf_p2, n_games=n_games_pdf
-    )
-    
-    st.download_button(
-        label="Download PDF Report",
-        data=pdf_bytes,
-        file_name=f"Report_{t1}_{t2}.pdf",
-        mime="application/pdf",
-        key="btn_master_matchup_report"
-    )
-    
-    # --- INITIALIZE VARIABLES (Prevents NameErrors) ---
-    pdf_p1, pdf_p2 = None, None
-    n_games_pdf = 1 
-    
-    # A. Determine Team Stats for the first page
-    if mode == "Games Boxscores":
-        s1, s2 = g['t1_stats'], g['t2_stats']
-    else:
-        # Re-fetch averages if they are somehow missing from memory
-        if t1_off is None:
-            if mode == "Head to Head Matchup":
-                s1, s2 = get_h2h_stats(t1, t2, league, season)
-            else:
-                s1 = get_per_game_volumes(t1, league, season, "TOTAL")
-                s2 = get_per_game_volumes(t2, league, season, "TOTAL")
-        else:
-            s1, s2 = t1_off, t2_off
-    
-    # B. Prepare the Team Table rows AND the Chart Buffer
-    if analysis_type == "4-Factors Net Points":
-        # Create the 4-Factors horizontal bar chart
-        chart_buf = create_pdf_chart_mpl(i1_tot, i2_tot, t1, t2)
-        table_rows = [
-            ("Shooting Net", f"{i1_tot['Shooting']:+.2f}", f"{i2_tot['Shooting']:+.2f}"),
-            ("Turnovers Net", f"{i1_tot['Turnovers']:+.2f}", f"{i2_tot['Turnovers']:+.2f}"),
-            ("Rebounding Net", f"{i1_tot['Rebounding']:+.2f}", f"{i2_tot['Rebounding']:+.2f}"),
-            ("Free Throws Net", f"{i1_tot['Free Throws']:+.2f}", f"{i2_tot['Free Throws']:+.2f}"),
-            ("TOTAL 4F IMPACT", f"{sum(i1_tot.values()):+.2f}", f"{sum(i2_tot.values()):+.2f}")
-        ]
-    else:
-        # --- THE FIX FOR THE NAME ERROR ---
-        # 1. Create the Situational chart (Pts off TO, etc.) for the PDF
-        # Note: we use the s1 and s2 stats identified in Section A
-        chart_buf = create_pdf_situational_mpl(s1, s2, t1, t2, lg_data)
-        
-        # 2. Define the table rows for the Classic/Situational mode
-        table_rows = [
-            ("Pts off TO", f"{s1.get('pts_off_to', 0):.1f}", f"{s2.get('pts_off_to', 0):.1f}"),
-            ("2nd Chance", f"{s1.get('pts_2nd_ch', 0):.1f}", f"{s2.get('pts_2nd_ch', 0):.1f}"),
-            ("Fast Break", f"{s1.get('pts_fb', 0):.1f}", f"{s2.get('pts_fb', 0):.1f}")
-        ]
-    # C. Load Player Data (Only for Net Points mode)
-    if analysis_type == "4-Factors Net Points":
-        if mode == "Games Boxscores":
-            pdf_p1 = load_single_game_individual(game_record['path'], t1)
-            pdf_p2 = load_single_game_individual(game_record['path'], t2)
-            n_games_pdf = 1
-        
-        elif mode == "Head to Head Matchup":
-            # This counts how many games were found in the index for this rivalry
-            mask_h2h = (
-                (df_index['league'] == league) & 
-                (df_index['season'] == season) & 
-                (
-                    ((df_index['t1'] == t1) & (df_index['t2'] == t2)) |
-                    ((df_index['t1'] == t2) & (df_index['t2'] == t1))
-                )
-            )
-            n_games_pdf = len(df_index[mask_h2h]) # This must be passed to Section E
-            
-            pdf_p1 = load_h2h_individual_data(t1, t2, league, season)
-            pdf_p2 = load_h2h_individual_data(t2, t1, league, season)
-        
-        else: # Season Aggregates
-            c_phase = phase if 'phase' in locals() else None
-            pdf_p1 = load_individual_aggregate(t1, league, season, c_phase)
-            pdf_p2 = load_individual_aggregate(t2, league, season, c_phase)
-            team_stats_for_gp = get_per_game_volumes(t1, league, season)
-            n_games_pdf = team_stats_for_gp.get('gp', 1)
-
-    # D. Determine Subtitle safely
-    if mode == "Season Aggregates per Team":
-        sub = f"{season} Team Profile"
-    elif mode == "Head to Head Matchup":
-        sub = f"{season} H2H Aggregate ({n_games_pdf} Games)"
-    elif mode == "Games Boxscores":
-        sub = f"{game_record['round']} Boxscore"
-    else:
-        sub = f"{season} Scouting Report"
-
-    # E. Generate and Download
-    # All variables (pdf_p1, pdf_p2, n_games_pdf) are now guaranteed to exist!
-    pdf_bytes = generate_unified_report(
-        chart_buf, t1, t2, analysis_type, sub, table_rows, 
-        pdf_p1, pdf_p2, n_games=n_games_pdf
-    )
-    
-    st.download_button(
-        label="Download PDF Report",
-        data=pdf_bytes,
-        file_name=f"Report_{t1}_{t2}.pdf",
-        mime="application/pdf",
-        key="btn_master_matchup_report"
-    )
+    st.caption("<div style='text-align:center;'>Tip: Ensure 'Background Graphics' is ON in print settings to keep heatmap colors.</div>", unsafe_allow_html=True)
