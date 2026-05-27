@@ -942,8 +942,8 @@ def get_raw_game_data_custom(file_path):
 def build_game_index():
     raw_data = []
     print("\n--- [START DYNAMIC INDEXING] ---")
-
-    # Step 1: Preliminary scan of all files to get Teams and IDs
+    
+    # 1. SCAN FILES
     for root, dirs, files in os.walk(DATA_BASE_PATH):
         if os.path.basename(root).lower() == "raw":
             rel_path = os.path.relpath(root, DATA_BASE_PATH)
@@ -958,18 +958,17 @@ def build_game_index():
                             group_part = filename.split(str(game_id))[-1].replace(".xlsx", "").strip("_")
                             group_part = group_part.replace("LIGAREGULAR", "")
                             group_name = group_part if group_part else "Main"
-
+                            
                             file_path = os.path.join(root, filename)
                             try:
-                                # Read just enough to get team names
-                                df = pd.read_excel(file_path, header=None, nrows=3)
-                                t1_name = str(df.iloc[1, 0]).strip()
-                                t2_name = str(df.iloc[2, 0]).strip()
-
+                                df_names = pd.read_excel(file_path, header=None, nrows=3)
+                                t1_raw = str(df_names.iloc[1, 0]).strip()
+                                t2_raw = str(df_names.iloc[2, 0]).strip()
+                                
                                 raw_data.append({
                                     "league": league, "season": season, "phase_orig": phase,
-                                    "group": group_name, "game_id": game_id, "t1": t1_name, "t2": t2_name,
-                                    "filename": filename, "path": file_path
+                                    "group": group_name, "game_id": game_id, 
+                                    "t1": t1_raw, "t2": t2_raw, "path": file_path
                                 })
                             except: continue
 
@@ -980,63 +979,50 @@ def build_game_index():
     df_all = pd.DataFrame(raw_data)
     final_data = []
 
-    # Step 2: Process each Phase separately
+    # 2. PROCESS EACH SUBGROUP
     for (lg, sn, ph_orig, gp), df_group in df_all.groupby(['league', 'season', 'phase_orig', 'group']):
-
-        is_postseason = "playoff" in ph_orig.lower() or "post" in ph_orig.lower()
-
+        
+        is_postseason = any(x in ph_orig.lower() for x in ["playoff", "post", "final", "f4"])
+        
         if is_postseason:
-            # --- SMART PLAYOFF LOGIC ---
-            df_group = df_group.copy()
+            df_group = df_group.copy().sort_values('game_id')
             df_group['matchup'] = df_group.apply(lambda x: "-".join(sorted([x['t1'], x['t2']])), axis=1)
-            
-            # Sort chronologically by game_id to map the timeline
-            df_group = df_group.sort_values('game_id').reset_index(drop=True)
-            
-            matchup_counts = df_group['matchup'].value_counts()
             seen_counts = {}
-            total_games = len(df_group)
-            
-            for i, row in df_group.iterrows():
+            for _, row in df_group.iterrows():
                 m_key = row['matchup']
                 seen_counts[m_key] = seen_counts.get(m_key, 0) + 1
-                
-                if lg == "Euroleague":
-                    # In Euroleague:
-                    # Best of 5 series have matchup_counts >= 3
-                    # Play-In and Final 4 have matchup_counts == 1
-                    if matchup_counts[m_key] == 1:
-                        if i < (total_games / 2): # Early season 1-game series = Play In
-                            if i < 2:
-                                round_label = "Play-In Round 1"
-                            else:
-                                round_label = "Play-In Round 2"
-                        else: # Late season 1-game series = Final 4
-                            round_label = "Final 4"
-                    else:
-                        round_label = f"Playoffs Game {seen_counts[m_key]}"
-                else:
-                    # ACB / Others Fallback
-                    if matchup_counts[m_key] == 1:
-                        round_label = "Single Game"
-                    else:
-                        round_label = f"Playoffs Game {seen_counts[m_key]}"
-
+                round_label = f"Playoffs G{seen_counts[m_key]}"
                 final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
-
         else:
-            # --- REGULAR SEASON LOGIC (ID-based) ---
+            # --- THE FEB BLOCK-SIZE LOGIC ---
+            
+            # 1. Identify unique teams
+            unique_teams = set(df_group['t1']) | set(df_group['t2'])
+            n_teams = len(unique_teams)
+            
+            # 2. Calculate the ID Block Size (IDs reserved per round)
+            # 13 or 14 teams -> Block size 7
+            # 17 or 18 teams -> Block size 9
+            id_block_size = (n_teams + 1) // 2 
+            
+            # 3. Find the Start ID of the season for this group
             base_id = df_group['game_id'].min()
-            games_per_rnd = LEAGUE_CONFIG.get(lg, {}).get("games_per_round", 9)
-
+            
+            # 4. Apply the Block-Size Formula
             for _, row in df_group.iterrows():
-                rnd_num = ((row['game_id'] - base_id) // games_per_rnd) + 1
-                round_label = f"Round {int(rnd_num):02d}"
+                # By using id_block_size, ID 714 in a 13-team league 
+                # correctly stays in Round 1: (714 - 708) // 7 + 1 = 1
+                rnd_num = ((row['game_id'] - base_id) // id_block_size) + 1
+                
+                # Cap the rounds to 34
+                display_rnd = min(int(rnd_num), 34)
+                
+                round_label = f"Round {display_rnd:02d}"
                 final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
 
     with open("game_index.json", "w") as f:
         json.dump(final_data, f, indent=4)
-    print(f"--- [INDEXING COMPLETE: {len(final_data)} games saved] ---\n")
+    print(f"--- [INDEXING COMPLETE] ---\n")
 def extract_game_details(row, lg, sn, ph_orig, gp, round_label):
     """Helper to read the actual scores from the file for the final index."""
     try:
@@ -1431,14 +1417,62 @@ if mode == "Home":
     with c2:
         st.markdown("### Analysis Categories")
         st.success("""
-        * **4-Factors Net Points**: Measures the impact of Shooting, Turnovers, Rebounding, and FTs in terms of point difference relative to average.
-        * **Situational Points**: Traditional 4-Factor percentages (eFG%, TO%, etc.) and situational scoring (Fast Break, 2nd Chance).
-        * **Individual Stats**: follow each player's impact in the game.
+        * **4-Factors Net Points**: Point-value impact of Shooting, Turnovers, Rebounding, and FTs.
+        * **4F Classic + Situational Points**: Traditional 4-Factor percentages and situational scoring (Fast Break, 2nd Chance and Points off Turnovers).
+        * **Individual Stats**: Track player impact game-by-game or league-wide.
         """)
 
+    # --- NEW MASTER GLOSSARY SECTION ---
+    st.markdown("---")
+    st.markdown("Methodology & Glossary")
+    
+    # Using tabs to organize a lot of information into a small space
+    tab_gen, tab_4f, tab_sit = st.tabs(["General Concepts", "4-Factors Net Points", "Situational Stats"])
+    
+    with tab_gen:
+        col_g1, col_g2 = st.columns(2)
+        with col_g1:
+            st.markdown("**League Efficiency (Effic)**")
+            st.caption("The baseline points scored per possession across the entire league for the selected season. Used as the 'multiplier' for Net Point costs. The value for each league is located in the sidebar in the System & Benchmarks section.")
+            
+            st.markdown("**OR% (Offensive Rebound %)**")
+            st.caption("The percentage of available offensive rebounds grabbed by the attacking team. Used to calculate the value of a single rebound.The value for each league is located in the sidebar in the System & Benchmarks section.")
+        with col_g2:
+            st.markdown("**OR/40**")
+            st.caption("Offensive Rebounds per 40 minutes of play. A more accurate scouting metric for individual players than total rebounds since the OR% per player is not available in the boxscores.")
+
+    with tab_4f:
+        st.info("The 4-Factors Net Points model translates percentages into actual points won or lost relative to a league-average performance.")
+        col_f1, col_f2 = st.columns(2)
+        with col_f1:
+            st.markdown("**Shooting Net**")
+            st.caption("Measures how many points a team made/saved via field goal accuracy compared to a league-average shooter taking the same number of shots. In the current settings, on offense a shooter gets 60% of the credit for a shot, while the assistant gets 30% and the rest of the teammates oncourt divides the rest (10%). On defense, a blocker gets 80% of the credit while the rest of the teammates oncourt divides the rest (20%)")
+            
+            st.markdown("**Turnovers Net**")
+            st.caption("Calculates the point cost of possessions lost. Each turnover 'costs' the team the average value of a possession (Lg. Effic). On offense, the player turning the ball over gets 100% of the credit, while for team TOs the oncourt players get 20% each. On defense, a stealer gets 90% of the credit while the rest of the teammates oncourt divides the rest (10%). On team TOs the oncourt players of the defensive team get 20% each.")
+        with col_f2:
+            st.markdown("**Rebounding Net**")
+            st.caption("Measures the impact of second possessions. It accounts for the value of the rebound weighted by the league's overall rebounding efficiency. On offense, the offensive rebounder gets 100% of the credit, while on defense the defensive rebounder gets 70% of the credit while the rest of the teammates oncourt divides the rest (30%)")
+            
+            st.markdown("**Free Throws Net**")
+            st.caption("The difference between actual points made at the line and the expected points based on league average FT volume and efficiency. On offense the FT shooter gets 100% of the credit. On defense, the oncourt players get 20% each.")
+
+    with tab_sit:
+        st.markdown("**Points off Turnovers (TO-P)**")
+        st.caption("Points scored on any possession that was initiated by an opponent's turnover.")
+        
+        st.markdown("**2nd Chance Points (2nd-C)**")
+        st.caption("Points scored within 8 seconds immediately following an offensive rebound.")
+        
+        st.markdown("**Fast Break Points (FB-P)**")
+        st.caption("Points scored on a play within 8 seconds of a defensive rebound, steal, or opponent's made basket. Includes points from FTs after a foul.")
+
+        st.markdown("**Tier Benchmarks (vs League Avg)**")
+        st.caption("In the dashboard, we categorize the Situational Edge into 4 tiers:")
+        st.code("Elite (>+4pts) | Above Avg (>0pts) | Below Avg (<-4pts) | Bottom Tier (<-4pts)")
     # Stop execution here so the Matchup/Display logic doesn't run
     st.stop()
-# --- 4. SYSTEM UTILITIES (Tucked away at the bottom) ---
+# --- 4. SYSTEM UTILITIES (Keep it simple) ---
 with st.sidebar.expander("System & Benchmarks", expanded=False):
     if st.button("Refresh Data Index"):
         build_game_index()
@@ -1452,17 +1486,6 @@ with st.sidebar.expander("System & Benchmarks", expanded=False):
         st.markdown(f"**Effic:** `{lg_effic:.2f}`")
     with col_lg2:
         st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
-    
-    st.markdown("---")
-    with st.expander("Glossary"):
-        st.info(
-            "**4 Factors Net Points:** assigning point values to each of the 4 factors based on league eficiency and league offensive rebounding % to assign costs.\n\n"
-            "**Lg. Effic:** Pts per possession.\n\n"
-            "**Lg. OR%:** % of available offensive rebounds grabbed.\n\n"
-            "**2nd Chance Pts:** Pts scored after offensive rebound.\n\n"
-            "**Pts off TO:** Pts scored after opponent turnover.\n\n"
-            "**Fast Break Pts:** Pts scored on a fast break."
-        )
 
 # --- NEW LOGIC FOR TEAM VS LEAGUE ---
 if mode == "Season Aggregates per Team":
