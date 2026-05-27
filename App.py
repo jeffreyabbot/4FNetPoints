@@ -1225,209 +1225,209 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
 # --- MAIN APP ----
 # --- CUSTOM THEMING (THE ULTIMATE VERSION) ---
 st.markdown("""
-    <style>
-            
-        /* 1. REDUCE GAP BETWEEN ALL SIDEBAR ELEMENTS */
-        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-            gap: 0.5rem !important; 
-        }
-
-        /* 2. TIGHTEN THE SPACE BETWEEN LABELS AND THE SELECT BOXES */
-        [data-testid="stSidebar"] label {
-            margin-bottom: -5px !important;
-            font-size: 0.9rem !important;
-        }
-
-        /* 3. REDUCE THE PADDING OF THE HORIZONTAL LINE (---) */
-        [data-testid="stSidebar"] hr {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.5rem !important;
-        }
-
-        /* 4. SHRINK THE SIDEBAR TITLE SPACING */
-        [data-testid="stSidebar"] h1 {
-            margin-top: -1rem !important;
-            margin-bottom: 0rem !important;
-            font-size: 1.5rem !important;
-        }
-                /* 5. MAIN PAGE COMPRESSION */
-        /* Reduce the gap between all elements on the main page */
-        [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
-            gap: 0.8rem !important; 
-        }
-
-        /* Tighten spacing for all headers (H1, H2, H3, H4) */
-        [data-testid="stAppViewContainer"] h1, 
-        [data-testid="stAppViewContainer"] h2, 
-        [data-testid="stAppViewContainer"] h3, 
-        [data-testid="stAppViewContainer"] h4 {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.2rem !important;
-        }
-
-        /* Reduce the padding inside the "st.container(border=True)" boxes */
-        [data-testid="stVerticalBlockBorderWrapper"] {
-            padding-top: 0.5rem !important;
-            padding-bottom: 0.5rem !important;
-        }
-
-        /* Tighten the space for st.metric cards */
-        [data-testid="stMetric"] {
-            padding: 0.5rem 0rem !important;
-        }
+<style>
         
-        /* Remove the massive top padding that Streamlit adds to the page */
-        .block-container {
-            padding-top: 2rem !important;
-            padding-bottom: 0rem !important;
-        }
+    /* 1. REDUCE GAP BETWEEN ALL SIDEBAR ELEMENTS */
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        gap: 0.5rem !important; 
+    }
 
-        /* 1. Sidebar Base & Main Vertical Spacing */
-        [data-testid="stSidebar"] {
-            background-color: #1e2130 !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-            gap: 1rem !important; 
-            padding-top: 1.5rem !important;
-        }
+    /* 2. TIGHTEN THE SPACE BETWEEN LABELS AND THE SELECT BOXES */
+    [data-testid="stSidebar"] label {
+        margin-bottom: -5px !important;
+        font-size: 0.9rem !important;
+    }
 
-        /* 2. Global Text & Paragraph Reset */
-        [data-testid="stSidebar"] * {
-            color: #ffffff !important;
-        }
-        [data-testid="stSidebar"] p {
-            margin-bottom: 0.2rem !important;
-        }
+    /* 3. REDUCE THE PADDING OF THE HORIZONTAL LINE (---) */
+    [data-testid="stSidebar"] hr {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.5rem !important;
+    }
 
-        /* 3. FIX LABEL SPACING (Main titles) */
-        [data-testid="stSidebar"] label {
-            margin-bottom: 4px !important;
-            font-weight: 600 !important;
-            display: flex;
-        }
+    /* 4. SHRINK THE SIDEBAR TITLE SPACING */
+    [data-testid="stSidebar"] h1 {
+        margin-top: -1rem !important;
+        margin-bottom: 0rem !important;
+        font-size: 1.5rem !important;
+    }
+    /* 5. MAIN PAGE COMPRESSION */
+    /* Reduce the gap between all elements on the main page */
+    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
+        gap: 0.8rem !important; 
+    }
 
-        /* 4. Info Box (Explanation) - Subtle Red Accent */
-        [data-testid="stSidebar"] .stAlert {
-            background-color: rgba(255, 255, 255, 0.05) !important;
-            border: 1px solid #3f445e !important;
-            border-left: 5px solid #FF4B4B !important;
-        }
-        [data-testid="stSidebar"] .stAlert p {
-            color: #cbd5e1 !important;
-            font-weight: normal !important;
-            font-size: 0.85rem !important;
-        }
+    /* Tighten spacing for all headers (H1, H2, H3, H4) */
+    [data-testid="stAppViewContainer"] h1, 
+    [data-testid="stAppViewContainer"] h2, 
+    [data-testid="stAppViewContainer"] h3, 
+    [data-testid="stAppViewContainer"] h4 {
+        margin-top: 0.5rem !important;
+        margin-bottom: 0.2rem !important;
+    }
 
-        /* 5. FIX BENCHMARK SECTION (Tighten specifically) */
-        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-            gap: 0.5rem !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-            margin-top: -8px !important;
-            opacity: 0.8;
-        }
+    /* Reduce the padding inside the "st.container(border=True)" boxes */
+    [data-testid="stVerticalBlockBorderWrapper"] {
+        padding-top: 0.5rem !important;
+        padding-bottom: 0.5rem !important;
+    }
 
-        /* 6. SELECTBOXES & MULTISELECT */
-        [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
-        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
-            background-color: #2d324a !important;
-            border: 1px solid #3f445e !important;
-        }
-        [data-testid="stSidebar"] div[data-baseweb="select"] * {
-            color: #ffffff !important;
-        }
-        span[data-baseweb="tag"] {
-            background-color: #FF4B4B !important;
-            color: white !important;
-        }
+    /* Tighten the space for st.metric cards */
+    [data-testid="stMetric"] {
+        padding: 0.5rem 0rem !important;
+    }
+    
+    /* Remove the massive top padding that Streamlit adds to the page */
+    .block-container {
+        padding-top: 2rem !important;
+        padding-bottom: 0rem !important;
+    }
 
-        /* 7. BENCHMARK CHIPS */
-        [data-testid="stSidebar"] code {
-            background-color: #2d324a !important;
-            color: #ffffff !important;
-            border: 1px solid #3f445e !important;
-            padding: 1px 4px !important;
-        }
+    /* 1. Sidebar Base & Main Vertical Spacing */
+    [data-testid="stSidebar"] {
+        background-color: #1e2130 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+        gap: 1rem !important; 
+        padding-top: 1.5rem !important;
+    }
 
-        /* 8. SLIDER FIXES (Red Bar) */
-        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
-            background-color: #FF4B4B !important;
-            border: 2px solid #ffffff !important;
-        }
-        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="presentation"] > div:first-child > div {
-            background: #FF4B4B !important;
-        }
-        [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
-        [data-testid="stSidebar"] [data-testid="stTickBarMax"],
-        [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
-            background-color: transparent !important;
-        }
+    /* 2. Global Text & Paragraph Reset */
+    [data-testid="stSidebar"] * {
+        color: #ffffff !important;
+    }
+    [data-testid="stSidebar"] p {
+        margin-bottom: 0.2rem !important;
+    }
 
-        /* 9. REFRESH BUTTON */
-        [data-testid="stSidebar"] button {
-            background-color: #2d324a !important;
-            border: 1px solid #FF4B4B !important;
-        }
-        [data-testid="stSidebar"] button:hover {
-            background-color: #FF4B4B !important;
-        }
+    /* 3. FIX LABEL SPACING (Main titles) */
+    [data-testid="stSidebar"] label {
+        margin-bottom: 4px !important;
+        font-weight: 600 !important;
+        display: flex;
+    }
 
-        /* 10. LOGO CARD & HORIZONTAL RULE */
-        [data-testid="stSidebar"] [data-testid="stImage"] {
-            background-color: #ffffff !important;
-            padding: 8px !important;
-            border-radius: 8px !important;
-        }
-        /* 11. FIX EXPANDER TO LOOK LIKE SELECTBOX */
-        [data-testid="stSidebar"] [data-testid="stExpander"] {
-            background-color: #2d324a !important; /* Match Selectbox Background */
-            border: 1px solid #3f445e !important; /* Match Selectbox Border */
-            border-radius: 4px !important;
-        }
+    /* 4. Info Box (Explanation) - Subtle Red Accent */
+    [data-testid="stSidebar"] .stAlert {
+        background-color: rgba(255, 255, 255, 0.05) !important;
+        border: 1px solid #3f445e !important;
+        border-left: 5px solid #FF4B4B !important;
+    }
+    [data-testid="stSidebar"] .stAlert p {
+        color: #cbd5e1 !important;
+        font-weight: normal !important;
+        font-size: 0.85rem !important;
+    }
 
-        /* Header (The clickable bar) */
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary {
-            padding: 5px 10px !important; /* Shrink to match selectbox height */
-        }
+    /* 5. FIX BENCHMARK SECTION (Tighten specifically) */
+    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+        gap: 0.5rem !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+        margin-top: -8px !important;
+        opacity: 0.8;
+    }
 
-        /* Hover states for the header */
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
-            background-color: #3f445e !important; /* Slightly lighter on hover */
-        }
+    /* 6. SELECTBOXES & MULTISELECT */
+    [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
+    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
+        background-color: #2d324a !important;
+        border: 1px solid #3f445e !important;
+    }
+    [data-testid="stSidebar"] div[data-baseweb="select"] * {
+        color: #ffffff !important;
+    }
+    span[data-baseweb="tag"] {
+        background-color: #FF4B4B !important;
+        color: white !important;
+    }
 
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p,
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover span {
-            color: #ffffff !important;
-        }
+    /* 7. BENCHMARK CHIPS */
+    [data-testid="stSidebar"] code {
+        background-color: #2d324a !important;
+        color: #ffffff !important;
+        border: 1px solid #3f445e !important;
+        padding: 1px 4px !important;
+    }
 
-        /* The Chevron icon */
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary svg {
-            fill: #ffffff !important;
-        }
+    /* 8. SLIDER FIXES (Red Bar) */
+    [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
+        background-color: #FF4B4B !important;
+        border: 2px solid #ffffff !important;
+    }
+    [data-testid="stSidebar"] [data-baseweb="slider"] div[role="presentation"] > div:first-child > div {
+        background: #FF4B4B !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
+    [data-testid="stSidebar"] [data-testid="stTickBarMax"],
+    [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
+        background-color: transparent !important;
+    }
 
-        /* 12. EXPANDER CONTENT AREA (When open) */
-        [data-testid="stSidebar"] [data-testid="stExpander"] details[open] summary {
-            border-bottom: 1px solid #3f445e !important; /* Line between header and content */
-            border-radius: 4px 4px 0 0 !important;
-        }
+    /* 9. REFRESH BUTTON */
+    [data-testid="stSidebar"] button {
+        background-color: #2d324a !important;
+        border: 1px solid #FF4B4B !important;
+    }
+    [data-testid="stSidebar"] button:hover {
+        background-color: #FF4B4B !important;
+    }
 
-        [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stVerticalBlock"] {
-            background-color: #1e2130 !important; /* Darker inside the drawer */
-            padding: 12px !important;
-            gap: 0.5rem !important;
-        }
+    /* 10. LOGO CARD & HORIZONTAL RULE */
+    [data-testid="stSidebar"] [data-testid="stImage"] {
+        background-color: #ffffff !important;
+        padding: 8px !important;
+        border-radius: 8px !important;
+    }
+    /* 11. FIX EXPANDER TO LOOK LIKE SELECTBOX */
+    [data-testid="stSidebar"] [data-testid="stExpander"] {
+        background-color: #2d324a !important; /* Match Selectbox Background */
+        border: 1px solid #3f445e !important; /* Match Selectbox Border */
+        border-radius: 4px !important;
+    }
 
-        /* Internal Multiselect Scrollbar - Prevent the tags from pushing the sidebar down */
-        [data-testid="stSidebar"] [data-testid="stExpander"] .stMultiSelect div[data-baseweb="select"] > div:first-child {
-            max-height: 120px !important;
-            overflow-y: auto !important;
-        }
-        
-        /* Remove the inner border Streamlit adds to the content */
-        [data-testid="stSidebar"] [data-testid="stExpander"] > div:last-child {
-            border: none !important;
-        }
-    </style>
+    /* Header (The clickable bar) */
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+        padding: 5px 10px !important; /* Shrink to match selectbox height */
+    }
+
+    /* Hover states for the header */
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+        background-color: #3f445e !important; /* Slightly lighter on hover */
+    }
+
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p,
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover span {
+        color: #ffffff !important;
+    }
+
+    /* The Chevron icon */
+    [data-testid="stSidebar"] [data-testid="stExpander"] summary svg {
+        fill: #ffffff !important;
+    }
+
+    /* 12. EXPANDER CONTENT AREA (When open) */
+    [data-testid="stSidebar"] [data-testid="stExpander"] details[open] summary {
+        border-bottom: 1px solid #3f445e !important; /* Line between header and content */
+        border-radius: 4px 4px 0 0 !important;
+    }
+
+    [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stVerticalBlock"] {
+        background-color: #1e2130 !important; /* Darker inside the drawer */
+        padding: 12px !important;
+        gap: 0.5rem !important;
+    }
+
+    /* Internal Multiselect Scrollbar - Prevent the tags from pushing the sidebar down */
+    [data-testid="stSidebar"] [data-testid="stExpander"] .stMultiSelect div[data-baseweb="select"] > div:first-child {
+        max-height: 120px !important;
+        overflow-y: auto !important;
+    }
+    
+    /* Remove the inner border Streamlit adds to the content */
+    [data-testid="stSidebar"] [data-testid="stExpander"] > div:last-child {
+        border: none !important;
+    }
+</style>
 """, unsafe_allow_html=True)
 st.set_page_config(page_title="4Factors Net Points", layout="wide")
 if not os.path.exists("game_index.json"): build_game_index()
@@ -1452,7 +1452,8 @@ mode = st.sidebar.radio(
     key="mode_radio"
 )
 analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points", "4-Factors Classic "], key="analysis_type")
-
+# --- ADD THIS LINE: Reserve an empty space for future filters ---
+sidebar_filters = st.sidebar.container()
 # --- 3. THE MATH (Invisible - no st. calls here) ---
 # These calculations MUST happen before the "if mode == ..." blocks
 t1_off, t2_off = None, None
@@ -1530,6 +1531,7 @@ with st.sidebar.expander("System & Benchmarks", expanded=False):
     st.markdown("---")
     with st.expander("Glossary"):
         st.info(
+            "**4 Factors Net Points:** assigning point values to each of the 4 factors based on league eficiency and league offensive rebounding % to assign costs.\n\n"
             "**Lg. Effic:** Pts per possession.\n\n"
             "**Lg. OR%:** % of available offensive rebounds grabbed.\n\n"
             "**2nd Chance Pts:** Pts scored after offensive rebound.\n\n"
@@ -1540,7 +1542,7 @@ with st.sidebar.expander("System & Benchmarks", expanded=False):
 # --- NEW LOGIC FOR TEAM VS LEAGUE ---
 if mode == "Season Aggregates per Team":
     teams = get_teams_in_league(league, season)
-    t1 = st.sidebar.selectbox("Select Team", teams, index=0, key="t1_agg")
+    t1 = sidebar_filters.selectbox("Select Team", teams, index=0, key="t1_agg")
     # We get the max games from the team stats so the slider range is dynamic
     t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
     max_gp_possible = int(t1_off.get('gp', 1))
@@ -1564,8 +1566,8 @@ if mode == "Season Aggregates per Team":
 # --- 2. MODE: HEAD TO HEAD MATCHUP (Team A vs Team B Sum) ---
 elif mode == "Head to Head Matchup":
     teams = get_teams_in_league(league, season)
-    t1 = st.sidebar.selectbox("Home Team", teams, index=0, key="t1_h2h")
-    t2 = st.sidebar.selectbox("Away Team", teams, index=min(1, len(teams)-1), key="t2_h2h")
+    t1 = sidebar_filters.selectbox("Home Team", teams, index=0, key="t1_h2h")
+    t2 = sidebar_filters.selectbox("Away Team", teams, index=min(1, len(teams)-1), key="t2_h2h")
     # 1. PEFORM THE INDEX CHECK FIRST
     # We call get_h2h_stats, but we need to know if it actually found games
     t1_sum, t2_sum = get_h2h_stats(t1, t2, league, season)
@@ -1625,7 +1627,7 @@ elif mode == "Team Performance by Game":
 
     # 1. SIDEBAR SELECTIONS
     phases_avail = sorted(df_league['phase'].unique())
-    sel_phase = st.sidebar.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
+    sel_phase = sidebar_filters.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
     
     df_phase_indexed = df_league[df_league['phase'] == sel_phase]
     teams_in_phase = sorted(list(set(df_phase_indexed['t1'].unique()) | set(df_phase_indexed['t2'].unique())))
@@ -1634,7 +1636,7 @@ elif mode == "Team Performance by Game":
         st.sidebar.warning("No teams found for this phase.")
         st.stop()
         
-    target_team = st.sidebar.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
+    target_team = sidebar_filters.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
 
     # 2. DATA PREPARATION
     df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
@@ -1948,7 +1950,7 @@ elif mode == "Overall League Standings":
     # 1. Phase Selection
     phases_in_index = sorted(df_league['phase'].unique())
     phase_options = ["Overall Season"] + phases_in_index
-    selected_phase = st.sidebar.selectbox("Phase / Group", phase_options, key="standings_phase")
+    selected_phase = sidebar_filters.selectbox("Phase / Group", phase_options, key="standings_phase")
     
     st.subheader(f"{league} {season} - {selected_phase}")
     
@@ -2147,14 +2149,14 @@ elif mode == "Overall League Standings":
 else: 
     df_f = df_league[df_league['season'] == season].copy()
     phase_options = sorted(df_f['phase'].unique())
-    phase = st.sidebar.selectbox("Phase / Group", phase_options, key="phase_sel")
+    phase = sidebar_filters.selectbox("Phase / Group", phase_options, key="phase_sel")
     df_f = df_f[df_f['phase'] == phase].copy()
     
-    round_val = st.sidebar.selectbox("Round", sorted(df_f['round'].unique()), key="round_sel")
+    round_val = sidebar_filters.selectbox("Round", sorted(df_f['round'].unique()), key="round_sel")
     df_f = df_f[df_f['round'] == round_val].copy()
     
     df_f['display'] = df_f.apply(lambda x: f"{x['round']} | {x['t1']} ({x['pts1']}) vs {x['t2']} ({x['pts2']})", axis=1)
-    game_display = st.sidebar.selectbox("Game", df_f['display'].unique(), key="game_sel")
+    game_display = sidebar_filters.selectbox("Game", df_f['display'].unique(), key="game_sel")
     game_record = df_f[df_f['display'] == game_display].iloc[0]
     
     g = get_raw_game_data_custom(game_record['path'])
