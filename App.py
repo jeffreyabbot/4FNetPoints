@@ -1226,208 +1226,151 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
 # --- CUSTOM THEMING (THE ULTIMATE VERSION) ---
 st.markdown("""
 <style>
-        
-    /* 1. REDUCE GAP BETWEEN ALL SIDEBAR ELEMENTS */
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-        gap: 0.5rem !important; 
-    }
+        /* PHASE 1: SIDEBAR LAYOUT & SPACING */
+        [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
+            gap: 0.5rem !important; 
+        }
 
-    /* 2. TIGHTEN THE SPACE BETWEEN LABELS AND THE SELECT BOXES */
-    [data-testid="stSidebar"] label {
-        margin-bottom: -5px !important;
-        font-size: 0.9rem !important;
-    }
+        /* PHASE 2: MAIN PAGE COMPRESSION */
+        [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
+            gap: 0.8rem !important; 
+        }
+        [data-testid="stAppViewContainer"] h1, 
+        [data-testid="stAppViewContainer"] h2, 
+        [data-testid="stAppViewContainer"] h3, 
+        [data-testid="stAppViewContainer"] h4 {
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.2rem !important;
+        }
+        [data-testid="stVerticalBlockBorderWrapper"] {
+            padding-top: 0.5rem !important;
+            padding-bottom: 0.5rem !important;
+        }
+        [data-testid="stMetric"] {
+            padding: 0.5rem 0rem !important;
+        }
+        .block-container {
+            padding-top: 2rem !important;
+            padding-bottom: 0rem !important;
+        }
 
-    /* 3. REDUCE THE PADDING OF THE HORIZONTAL LINE (---) */
-    [data-testid="stSidebar"] hr {
-        margin-top: 0.5rem !important;
-        margin-bottom: 0.5rem !important;
-    }
+        /* PHASE 3: SIDEBAR CORE THEME & TEXT FIX (The "Blank Hover" Fix) */
+        [data-testid="stSidebar"] {
+            background-color: #1e2130 !important;
+        }
+        /* Specifically target text elements to avoid breaking button hover colors */
+        [data-testid="stSidebar"] p, 
+        [data-testid="stSidebar"] label, 
+        [data-testid="stSidebar"] h1, 
+        [data-testid="stSidebar"] h2, 
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] span:not([data-baseweb="tag"]) {
+            color: #ffffff !important;
+        }
 
-    /* 4. SHRINK THE SIDEBAR TITLE SPACING */
-    [data-testid="stSidebar"] h1 {
-        margin-top: -1rem !important;
-        margin-bottom: 0rem !important;
-        font-size: 1.5rem !important;
-    }
-    /* 5. MAIN PAGE COMPRESSION */
-    /* Reduce the gap between all elements on the main page */
-    [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
-        gap: 0.8rem !important; 
-    }
+        /* PHASE 4: SIDEBAR LABELS & TITLES */
+        [data-testid="stSidebar"] label {
+            margin-bottom: -5px !important;
+            font-size: 0.9rem !important;
+            font-weight: 600 !important;
+            display: flex;
+        }
+        [data-testid="stSidebar"] h1 {
+            margin-top: -1rem !important;
+            margin-bottom: 0rem !important;
+            font-size: 1.5rem !important;
+        }
 
-    /* Tighten spacing for all headers (H1, H2, H3, H4) */
-    [data-testid="stAppViewContainer"] h1, 
-    [data-testid="stAppViewContainer"] h2, 
-    [data-testid="stAppViewContainer"] h3, 
-    [data-testid="stAppViewContainer"] h4 {
-        margin-top: 0.5rem !important;
-        margin-bottom: 0.2rem !important;
-    }
+        /* PHASE 5: INFO BOXES (ALERTS) */
+        [data-testid="stSidebar"] .stAlert {
+            background-color: rgba(255, 255, 255, 0.05) !important;
+            border: 1px solid #3f445e !important;
+            border-left: 5px solid #FF4B4B !important;
+        }
+        [data-testid="stSidebar"] .stAlert p {
+            color: #cbd5e1 !important; /* Slightly dimmed for readability */
+            font-weight: normal !important;
+            font-size: 0.85rem !important;
+        }
 
-    /* Reduce the padding inside the "st.container(border=True)" boxes */
-    [data-testid="stVerticalBlockBorderWrapper"] {
-        padding-top: 0.5rem !important;
-        padding-bottom: 0.5rem !important;
-    }
+        /* PHASE 6: DIVIDERS (HORIZONTAL RULES) */
+        [data-testid="stSidebar"] hr {
+            margin-top: 0.5rem !important;
+            margin-bottom: 0.5rem !important;
+            border-color: rgba(255,255,255,0.1) !important;
+        }
 
-    /* Tighten the space for st.metric cards */
-    [data-testid="stMetric"] {
-        padding: 0.5rem 0rem !important;
-    }
-    
-    /* Remove the massive top padding that Streamlit adds to the page */
-    .block-container {
-        padding-top: 2rem !important;
-        padding-bottom: 0rem !important;
-    }
+        /* PHASE 7: SELECTBOXES & MULTISELECT */
+        [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
+        [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
+            background-color: #2d324a !important;
+            border: 1px solid #3f445e !important;
+        }
+        [data-testid="stSidebar"] div[data-baseweb="select"] * {
+            color: #ffffff !important;
+        }
+        span[data-baseweb="tag"] {
+            background-color: #FF4B4B !important;
+            color: white !important;
+        }
 
-    /* 1. Sidebar Base & Main Vertical Spacing */
-    [data-testid="stSidebar"] {
-        background-color: #1e2130 !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-        gap: 1rem !important; 
-        padding-top: 1.5rem !important;
-    }
+        /* PHASE 8: BENCHMARK CHIPS & CODE */
+        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
+            gap: 0.5rem !important;
+        }
+        [data-testid="stSidebar"] code {
+            background-color: #2d324a !important;
+            color: #ffffff !important;
+            border: 1px solid #3f445e !important;
+            padding: 1px 4px !important;
+        }
 
-    /* 2. Global Text & Paragraph Reset */
-    [data-testid="stSidebar"] * {
-        color: #ffffff !important;
-    }
-    [data-testid="stSidebar"] p {
-        margin-bottom: 0.2rem !important;
-    }
+        /* PHASE 9: SLIDERS (RED ACCENT) */
+        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
+            background-color: #FF4B4B !important;
+            border: 2px solid #ffffff !important;
+        }
+        [data-testid="stSidebar"] [data-baseweb="slider"] div[role="presentation"] > div:first-child > div {
+            background: #FF4B4B !important;
+        }
 
-    /* 3. FIX LABEL SPACING (Main titles) */
-    [data-testid="stSidebar"] label {
-        margin-bottom: 4px !important;
-        font-weight: 600 !important;
-        display: flex;
-    }
+        /* PHASE 10: BUTTONS (HOVER FIX) */
+        [data-testid="stSidebar"] button {
+            background-color: #2d324a !important;
+            border: 1px solid #FF4B4B !important;
+        }
+        [data-testid="stSidebar"] button:hover {
+            background-color: #FF4B4B !important;
+        }
+        /* Ensure button text is visible during hover */
+        [data-testid="stSidebar"] button p {
+            color: inherit !important;
+        }
 
-    /* 4. Info Box (Explanation) - Subtle Red Accent */
-    [data-testid="stSidebar"] .stAlert {
-        background-color: rgba(255, 255, 255, 0.05) !important;
-        border: 1px solid #3f445e !important;
-        border-left: 5px solid #FF4B4B !important;
-    }
-    [data-testid="stSidebar"] .stAlert p {
-        color: #cbd5e1 !important;
-        font-weight: normal !important;
-        font-size: 0.85rem !important;
-    }
+        /* PHASE 11: LOGO CARD */
+        [data-testid="stSidebar"] [data-testid="stImage"] {
+            background-color: #ffffff !important;
+            padding: 8px !important;
+            border-radius: 8px !important;
+        }
 
-    /* 5. FIX BENCHMARK SECTION (Tighten specifically) */
-    [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-        gap: 0.5rem !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
-        margin-top: -8px !important;
-        opacity: 0.8;
-    }
-
-    /* 6. SELECTBOXES & MULTISELECT */
-    [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
-    [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
-        background-color: #2d324a !important;
-        border: 1px solid #3f445e !important;
-    }
-    [data-testid="stSidebar"] div[data-baseweb="select"] * {
-        color: #ffffff !important;
-    }
-    span[data-baseweb="tag"] {
-        background-color: #FF4B4B !important;
-        color: white !important;
-    }
-
-    /* 7. BENCHMARK CHIPS */
-    [data-testid="stSidebar"] code {
-        background-color: #2d324a !important;
-        color: #ffffff !important;
-        border: 1px solid #3f445e !important;
-        padding: 1px 4px !important;
-    }
-
-    /* 8. SLIDER FIXES (Red Bar) */
-    [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
-        background-color: #FF4B4B !important;
-        border: 2px solid #ffffff !important;
-    }
-    [data-testid="stSidebar"] [data-baseweb="slider"] div[role="presentation"] > div:first-child > div {
-        background: #FF4B4B !important;
-    }
-    [data-testid="stSidebar"] [data-testid="stTickBarMin"], 
-    [data-testid="stSidebar"] [data-testid="stTickBarMax"],
-    [data-testid="stSidebar"] [data-baseweb="slider"] + div div {
-        background-color: transparent !important;
-    }
-
-    /* 9. REFRESH BUTTON */
-    [data-testid="stSidebar"] button {
-        background-color: #2d324a !important;
-        border: 1px solid #FF4B4B !important;
-    }
-    [data-testid="stSidebar"] button:hover {
-        background-color: #FF4B4B !important;
-    }
-
-    /* 10. LOGO CARD & HORIZONTAL RULE */
-    [data-testid="stSidebar"] [data-testid="stImage"] {
-        background-color: #ffffff !important;
-        padding: 8px !important;
-        border-radius: 8px !important;
-    }
-    /* 11. FIX EXPANDER TO LOOK LIKE SELECTBOX */
-    [data-testid="stSidebar"] [data-testid="stExpander"] {
-        background-color: #2d324a !important; /* Match Selectbox Background */
-        border: 1px solid #3f445e !important; /* Match Selectbox Border */
-        border-radius: 4px !important;
-    }
-
-    /* Header (The clickable bar) */
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary {
-        padding: 5px 10px !important; /* Shrink to match selectbox height */
-    }
-
-    /* Hover states for the header */
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
-        background-color: #3f445e !important; /* Slightly lighter on hover */
-    }
-
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p,
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover span {
-        color: #ffffff !important;
-    }
-
-    /* The Chevron icon */
-    [data-testid="stSidebar"] [data-testid="stExpander"] summary svg {
-        fill: #ffffff !important;
-    }
-
-    /* 12. EXPANDER CONTENT AREA (When open) */
-    [data-testid="stSidebar"] [data-testid="stExpander"] details[open] summary {
-        border-bottom: 1px solid #3f445e !important; /* Line between header and content */
-        border-radius: 4px 4px 0 0 !important;
-    }
-
-    [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stVerticalBlock"] {
-        background-color: #1e2130 !important; /* Darker inside the drawer */
-        padding: 12px !important;
-        gap: 0.5rem !important;
-    }
-
-    /* Internal Multiselect Scrollbar - Prevent the tags from pushing the sidebar down */
-    [data-testid="stSidebar"] [data-testid="stExpander"] .stMultiSelect div[data-baseweb="select"] > div:first-child {
-        max-height: 120px !important;
-        overflow-y: auto !important;
-    }
-    
-    /* Remove the inner border Streamlit adds to the content */
-    [data-testid="stSidebar"] [data-testid="stExpander"] > div:last-child {
-        border: none !important;
-    }
-</style>
+        /* PHASE 12: EXPANDERS (DRAWER UI) */
+        [data-testid="stSidebar"] [data-testid="stExpander"] {
+            background-color: #2d324a !important;
+            border: 1px solid #3f445e !important;
+            border-radius: 4px !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
+            background-color: #3f445e !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p {
+            color: #ffffff !important;
+        }
+        [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stVerticalBlock"] {
+            background-color: #1e2130 !important;
+            padding: 12px !important;
+        }
+    </style>
 """, unsafe_allow_html=True)
 st.set_page_config(page_title="4Factors Net Points", layout="wide")
 if not os.path.exists("game_index.json"): build_game_index()
