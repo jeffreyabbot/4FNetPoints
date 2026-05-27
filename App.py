@@ -1226,81 +1226,62 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
 # --- CUSTOM THEMING (THE ULTIMATE VERSION) ---
 st.markdown("""
 <style>
-        /* PHASE 1: SIDEBAR LAYOUT & SPACING */
+        /* PHASE 1: SIDEBAR SPACING (Relaxed) */
         [data-testid="stSidebar"] [data-testid="stVerticalBlock"] {
-            gap: 0.5rem !important; 
+            gap: 1.2rem !important; /* Increased from 0.5 for breathing room */
         }
 
-        /* PHASE 2: MAIN PAGE COMPRESSION */
+        /* PHASE 2: MAIN PAGE LAYOUT (Restored) */
         [data-testid="stAppViewContainer"] [data-testid="stVerticalBlock"] {
-            gap: 0.8rem !important; 
-        }
-        [data-testid="stAppViewContainer"] h1, 
-        [data-testid="stAppViewContainer"] h2, 
-        [data-testid="stAppViewContainer"] h3, 
-        [data-testid="stAppViewContainer"] h4 {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.2rem !important;
-        }
-        [data-testid="stVerticalBlockBorderWrapper"] {
-            padding-top: 0.5rem !important;
-            padding-bottom: 0.5rem !important;
-        }
-        [data-testid="stMetric"] {
-            padding: 0.5rem 0rem !important;
+            gap: 1.5rem !important; 
         }
         .block-container {
-            padding-top: 2rem !important;
-            padding-bottom: 0rem !important;
+            padding-top: 3rem !important;
+            padding-bottom: 3rem !important;
         }
 
-        /* PHASE 3: SIDEBAR CORE THEME & TEXT FIX (The "Blank Hover" Fix) */
+        /* PHASE 3: SIDEBAR CORE THEME */
         [data-testid="stSidebar"] {
             background-color: #1e2130 !important;
         }
-        /* Specifically target text elements to avoid breaking button hover colors */
+        
+        /* PHASE 4: TEXT COLOR LOGIC (Fixes "Blank" bug) */
+        /* Target generic text, but NOT text inside buttons or expander headers */
         [data-testid="stSidebar"] p, 
         [data-testid="stSidebar"] label, 
         [data-testid="stSidebar"] h1, 
-        [data-testid="stSidebar"] h2, 
-        [data-testid="stSidebar"] h3,
-        [data-testid="stSidebar"] span:not([data-baseweb="tag"]) {
+        [data-testid="stSidebar"] h2 {
             color: #ffffff !important;
         }
 
-        /* PHASE 4: SIDEBAR LABELS & TITLES */
+        /* PHASE 5: LABELS & TITLES */
         [data-testid="stSidebar"] label {
-            margin-bottom: -5px !important;
-            font-size: 0.9rem !important;
+            margin-bottom: 5px !important;
+            font-size: 0.95rem !important;
             font-weight: 600 !important;
-            display: flex;
         }
         [data-testid="stSidebar"] h1 {
-            margin-top: -1rem !important;
-            margin-bottom: 0rem !important;
-            font-size: 1.5rem !important;
+            margin-top: 0rem !important;
+            font-size: 1.8rem !important;
         }
 
-        /* PHASE 5: INFO BOXES (ALERTS) */
+        /* PHASE 6: INFO BOXES (ALERTS) */
         [data-testid="stSidebar"] .stAlert {
-            background-color: rgba(255, 255, 255, 0.05) !important;
+            background-color: rgba(255, 255, 255, 0.07) !important;
             border: 1px solid #3f445e !important;
             border-left: 5px solid #FF4B4B !important;
         }
         [data-testid="stSidebar"] .stAlert p {
-            color: #cbd5e1 !important; /* Slightly dimmed for readability */
-            font-weight: normal !important;
-            font-size: 0.85rem !important;
+            color: #cbd5e1 !important;
         }
 
-        /* PHASE 6: DIVIDERS (HORIZONTAL RULES) */
+        /* PHASE 7: DIVIDERS */
         [data-testid="stSidebar"] hr {
-            margin-top: 0.5rem !important;
-            margin-bottom: 0.5rem !important;
+            margin: 1rem 0 !important;
             border-color: rgba(255,255,255,0.1) !important;
         }
 
-        /* PHASE 7: SELECTBOXES & MULTISELECT */
+        /* PHASE 8: SELECTBOXES & MULTISELECT */
         [data-testid="stSidebar"] .stMultiSelect div[data-baseweb="select"] > div,
         [data-testid="stSidebar"] .stSelectbox div[data-baseweb="select"] > div {
             background-color: #2d324a !important;
@@ -1309,23 +1290,16 @@ st.markdown("""
         [data-testid="stSidebar"] div[data-baseweb="select"] * {
             color: #ffffff !important;
         }
-        span[data-baseweb="tag"] {
-            background-color: #FF4B4B !important;
-            color: white !important;
-        }
 
-        /* PHASE 8: BENCHMARK CHIPS & CODE */
-        [data-testid="stSidebar"] [data-testid="stHorizontalBlock"] {
-            gap: 0.5rem !important;
-        }
+        /* PHASE 9: BENCHMARK CHIPS */
         [data-testid="stSidebar"] code {
             background-color: #2d324a !important;
             color: #ffffff !important;
             border: 1px solid #3f445e !important;
-            padding: 1px 4px !important;
+            padding: 2px 6px !important;
         }
 
-        /* PHASE 9: SLIDERS (RED ACCENT) */
+        /* PHASE 10: SLIDERS */
         [data-testid="stSidebar"] [data-baseweb="slider"] div[role="slider"] {
             background-color: #FF4B4B !important;
             border: 2px solid #ffffff !important;
@@ -1334,41 +1308,49 @@ st.markdown("""
             background: #FF4B4B !important;
         }
 
-        /* PHASE 10: BUTTONS (HOVER FIX) */
+        /* PHASE 11: BUTTONS (Hover fix for Cloud) */
         [data-testid="stSidebar"] button {
             background-color: #2d324a !important;
             border: 1px solid #FF4B4B !important;
+            color: #ffffff !important;
         }
         [data-testid="stSidebar"] button:hover {
             background-color: #FF4B4B !important;
+            color: #ffffff !important;
+            border: 1px solid #ffffff !important;
         }
-        /* Ensure button text is visible during hover */
+        /* Fix for button text disappearing on hover */
         [data-testid="stSidebar"] button p {
-            color: inherit !important;
+            color: white !important;
         }
 
-        /* PHASE 11: LOGO CARD */
-        [data-testid="stSidebar"] [data-testid="stImage"] {
-            background-color: #ffffff !important;
-            padding: 8px !important;
-            border-radius: 8px !important;
-        }
-
-        /* PHASE 12: EXPANDERS (DRAWER UI) */
+        /* PHASE 12: EXPANDERS (The specific fix for your screenshot) */
+        /* This forces the header of the expander to NOT turn white on hover */
         [data-testid="stSidebar"] [data-testid="stExpander"] {
             background-color: #2d324a !important;
             border: 1px solid #3f445e !important;
-            border-radius: 4px !important;
         }
+        
+        /* The clickable header part */
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary {
+            background-color: #2d324a !important;
+            color: white !important;
+        }
+
         [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover {
             background-color: #3f445e !important;
         }
-        [data-testid="stSidebar"] [data-testid="stExpander"] summary:hover p {
-            color: #ffffff !important;
+
+        /* Forces the text inside the header to remain visible */
+        [data-testid="stSidebar"] [data-testid="stExpander"] summary p {
+            color: white !important;
         }
+        
+        /* The content area inside the expander */
         [data-testid="stSidebar"] [data-testid="stExpander"] [data-testid="stVerticalBlock"] {
             background-color: #1e2130 !important;
-            padding: 12px !important;
+            padding: 15px !important;
+            border-top: 1px solid #3f445e !important;
         }
     </style>
 """, unsafe_allow_html=True)
