@@ -1805,7 +1805,27 @@ elif mode == "Team Performance by Game":
                 styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=avg_ftr-0.15, vmax=avg_ftr+0.15)
                 styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=avg_to-0.06, vmax=avg_to+0.06)
 
-        st.dataframe(styler, use_container_width=True, hide_index=True, column_order=cols_visible, column_config={"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small")})
+        # --- CAREFULLY INDENTED RENDER BLOCK ---
+        dynamic_height_team = (len(perf_df) * 36) + 45
+        
+        col_config_team = {
+            "Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), 
+            "Round": st.column_config.TextColumn("Rnd", width="small"),
+            "Matchup": st.column_config.TextColumn("Matchup", width="medium")
+        }
+        
+        for col in cols_visible:
+            if col not in ["Round", "Opp_Logo", "Matchup", "Outcome"]:
+                col_config_team[col] = st.column_config.NumberColumn(col, width="small")
+
+        st.dataframe(
+            styler, 
+            use_container_width=False, 
+            hide_index=True, 
+            height=dynamic_height_team,
+            column_order=cols_visible, 
+            column_config=col_config_team
+        )
 
     with tab_player_view:
         # 1. Player List
@@ -1901,7 +1921,28 @@ elif mode == "Team Performance by Game":
                         v_max = max(v_max, 1.0)
                         styler_p = styler_p.background_gradient(subset=[col], cmap=custom_rdwgn, vmin=-v_max, vmax=v_max)
 
-                st.dataframe(styler_p, use_container_width=True, hide_index=True, column_config={"Opp_Logo": st.column_config.ImageColumn("Opp", width="small")})
+                # --- THE MAGIC FIX FOR PLAYER VIEW (Team Performance by Game) ---
+                dynamic_height_p = (len(player_df) * 36) + 45
+                
+                # Base config for text/images
+                col_config_p = {
+                    "Opp_Logo": st.column_config.ImageColumn("Opp", width="small"),
+                    "Round": st.column_config.TextColumn("Round", width="small"),
+                    "Matchup": st.column_config.TextColumn("Matchup", width="medium")
+                }
+                
+                # Force all numeric data columns to be compact
+                for col in numeric_cols:
+                    col_config_p[col] = st.column_config.NumberColumn(col, width="small")
+
+                # Render the compact table
+                st.dataframe(
+                    styler_p, 
+                    use_container_width=False,  # <-- Removes massive gaps
+                    hide_index=True, 
+                    height=dynamic_height_p,    # <-- Removes scrollbar
+                    column_config=col_config_p
+                )
 
 elif mode == "Overall League Standings":
     # 1. Phase Selection
@@ -2032,17 +2073,26 @@ elif mode == "Overall League Standings":
                 cmap = custom_gnwr if "TO%" in col else custom_rdwgn
                 styler = styler.background_gradient(cmap=cmap, subset=[col], vmin=-v_max, vmax=v_max)
 
-            # 5. RENDER
+            # --- CAREFULLY INDENTED RENDER BLOCK ---
+            dynamic_height_standings = (len(standings_df) * 36) + 45
+            
+            col_config_standings = {
+                "Team_Logo": st.column_config.ImageColumn(" ", width="small"), 
+                "Pos": st.column_config.NumberColumn("Pos", width="small"),
+                "Team": st.column_config.TextColumn("Team", width="medium")
+            }
+            
+            for col in cols_visible:
+                if col not in ["Pos", "Team_Logo", "Team"]:
+                    col_config_standings[col] = st.column_config.NumberColumn(col, width="small")
+
             st.dataframe(
                 styler, 
-                use_container_width=True, 
-                height=600, 
+                use_container_width=False,  
+                height=dynamic_height_standings, 
                 hide_index=True, 
                 column_order=cols_visible,
-                column_config={
-                    "Team_Logo": st.column_config.ImageColumn(" ", width="small"), 
-                    "Pos": st.column_config.NumberColumn("Pos", width="small")
-                }
+                column_config=col_config_standings
             )
 
 # --- THE PLAYER TAB LOGIC ---
