@@ -774,7 +774,7 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
         st.warning(f"No player data found for {title}")
         return
 
-    # 1. SETUP COLUMN KEYS
+    # 1. SETUP COLUMN MAPPING
     col_map = {c.upper(): c for c in df.columns}
     def get_col(name): return col_map.get(name.upper())
     p_col = get_col('Player')
@@ -789,15 +789,13 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
         chosen_sort = st.selectbox("Rank By:", available_sorts, key=sort_key)
 
     actual_sort_col = get_col(chosen_sort)
-    # Sort: Lower is better for TO%, otherwise Higher is better
     is_ascending = True if chosen_sort == 'TO%' else False
     df_sorted = df.sort_values(actual_sort_col, ascending=is_ascending).copy()
 
-    # 3. ORGANIZE ROWS (Humans then Team Totals)
-    is_team_mask = df_sorted[p_col].str.contains('TEAM|EQUIP|TOTAL', case=False, na=False)
+    # 3. ROW MANAGEMENT
+    is_team_mask = df_sorted[p_col].str.contains('TEAM|EQUIP|TOTAL|--- TOTAL ---', case=False, na=False)
     df_humans = df_sorted[~is_team_mask].copy()
     df_team_row = df_sorted[is_team_mask].copy()
-
     df_humans.insert(0, 'Pos', range(1, len(df_humans) + 1))
     df_team_row.insert(0, 'Pos', 0)
     df_final = pd.concat([df_humans, df_team_row])
@@ -806,7 +804,6 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     cols_to_show = ['Pos', p_col]
     if get_col('Team_Name'): cols_to_show.append(get_col('Team_Name'))
     if get_col('GP'): cols_to_show.append(get_col('GP'))
-    
     if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
 
     classic_cols = ['PTS', 'eFG%', 'TO%', 'OR/40', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
@@ -829,67 +826,75 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     for f in ['Shooting', 'TOV', 'ORB', 'FT']:
         add_factor_group(f)
 
-    # Filter columns that actually exist
     cols_to_show = [c for i, c in enumerate(cols_to_show) if c in df_final.columns and c not in cols_to_show[:i]]
-    
-    # 5. PREPARE FORMATTING
     text_cols = ['Pos', p_col, get_col('Team_Name'), get_col('Team'), get_col('GP')]
     numeric_cols = [c for c in cols_to_show if c not in text_cols]
 
-    format_map = {}
+    # 5. FORMATTING MAP
+    format_map = {'Pos': "{:.0f}"}
     for col in numeric_cols:
         if '%' in col or col.upper() == 'FTR':
             format_map[col] = "{:.1%}" if '%' in col else "{:.3f}"
         elif col.upper() in [c.upper() for c in classic_cols]:
             format_map[col] = "{:.2f}"
-        else: format_map[col] = "{:+.2f}"
-    format_map['Pos'] = "{:.0f}"
+        else:
+            format_map[col] = "{:+.2f}"
     if get_col('GP') in df_final.columns: format_map[get_col('GP')] = "{:.0f}"
 
-    # 6. INITIALIZE STYLER (The "Unbound" Fix)
-    # We create the 'scouting_styler' here. It is now impossible for it to be undefined later.
-    scouting_styler = df_final[cols_to_show].style.format(format_map)
-    
-    # Baseline styling
-    scouting_styler = scouting_styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
-    scouting_styler = scouting_styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
+    # 6. INITIALIZE STYLER
+    styler = df_final[cols_to_show].style.format(format_map)
+    styler = styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
+    styler = styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
 
-    # 7. APPLY DYNAMIC GRADIENTS (Thermal Blue-Red)
+    # 7. OUTLIER TEXT HIGHLIGHTING (The "Scout's Eye")
+    # We pull the benchmarks from the global scope, with safe fallbacks
+    def highlight_outliers(val, col_name):
+        if col_name == actual_sort_col: return '' # Don't color text if background is colored
+        try:
+            v = float(val)
+            # Thresholds for Net Points
+            if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
+                if v >= 1.00: return 'color: #e06666; font-weight: bold;'
+                if v <= -1.00: return 'color: #6fa8dc; font-weight: bold;'
+            
+            # Thresholds for Classic Stats (using global averages if they exist)
+            if col_name == 'eFG%':
+                ref = globals().get('avg_efg', 0.52)
+                if v > ref + 0.08: return 'color: #e06666; font-weight: bold;'
+                if v < ref - 0.08: return 'color: #6fa8dc; font-weight: bold;'
+            if col_name == 'TO%':
+                ref = globals().get('avg_to', 0.16)
+                if v < ref - 0.05: return 'color: #e06666; font-weight: bold;'
+                if v > ref + 0.05: return 'color: #6fa8dc; font-weight: bold;'
+            if col_name == 'OR/40':
+                if v > 4.5: return 'color: #e06666; font-weight: bold;'
+        except: pass
+        return ''
+
     for col in numeric_cols:
-        # Dynamic Focus: Only color the column we are currently sorting by
+        styler = styler.map(lambda x, c=col: highlight_outliers(x, c), subset=[col])
+
+    # 8. BACKGROUND GRADIENTS (The "Thermal Focus")
+    for col in numeric_cols:
         if col == actual_sort_col:
             if col.upper() in [c.upper() for c in classic_cols]:
                 if col.upper() == 'TO%':
-                    scouting_styler = scouting_styler.background_gradient(cmap=custom_redblue, subset=[col])
+                    styler = styler.background_gradient(cmap=custom_redblue, subset=[col])
                 elif col.upper() in ['PTS', 'OR/40', 'PTS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK', 'F2M', 'F2A', 'F3M', 'F3A']:
-                    scouting_styler = scouting_styler.background_gradient(cmap=custom_wred, subset=[col])
+                    styler = styler.background_gradient(cmap=custom_wred, subset=[col])
                 else:
-                    scouting_styler = scouting_styler.background_gradient(cmap=custom_bluered, subset=[col])
+                    styler = styler.background_gradient(cmap=custom_bluered, subset=[col])
             else:
-                # Net Points (Centered at 0)
                 v_max = df_final[col].abs().max()
                 v_max = max(v_max, 1.0)
-                scouting_styler = scouting_styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=-v_max, vmax=v_max)
-        else:
-            # All other columns stay white/clean
-            continue
+                styler = styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=-v_max, vmax=v_max)
 
-    # 8. RENDER
+    # 9. RENDER
     dynamic_height = (len(df_final) * 36) + 45
-    col_config = {
-        "Pos": st.column_config.NumberColumn("Pos", width="small"), 
-        p_col: st.column_config.TextColumn("Player", width="medium")
-    }
-    for col in numeric_cols:
-        col_config[col] = st.column_config.NumberColumn(col, width="small")
+    col_config = {"Pos": st.column_config.NumberColumn("Pos", width="small"), p_col: st.column_config.TextColumn("Player", width="medium")}
+    for col in numeric_cols: col_config[col] = st.column_config.NumberColumn(col, width="small")
 
-    st.dataframe(
-        scouting_styler, 
-        use_container_width=False, 
-        hide_index=True, 
-        height=dynamic_height, 
-        column_config=col_config
-    )
+    st.dataframe(styler, use_container_width=False, hide_index=True, height=dynamic_height, column_config=col_config)
 def get_teams_in_league(league, season): # Added season param
     teams = set()
     season_path = os.path.join(DATA_BASE_PATH, league, season) # Target specific season
