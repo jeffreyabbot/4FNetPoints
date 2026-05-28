@@ -23,14 +23,17 @@ LEAGUE_CONFIG = {
 }
 from matplotlib.colors import LinearSegmentedColormap
 
-# 1. Red-White-Green (Standard: High is Good)
-custom_rdwgn = LinearSegmentedColormap.from_list("rdwgn", ["#ff9999", "#ffffff", "#99ff99"])
+# --- PROFESSIONAL COLOR PALETTES (Blue-White-Red) ---
+from matplotlib.colors import LinearSegmentedColormap
 
-# 2. Green-White-Red (Inverted: Low is Good - for Turnovers)
-custom_gnwr = LinearSegmentedColormap.from_list("gnwr", ["#99ff99", "#ffffff", "#ff9999"])
+# 1. Blue-White-Red (Thermal: Red is Hot/Good, Blue is Cold/Bad)
+custom_bluered = LinearSegmentedColormap.from_list("bluered", ["#6fa8dc", "#ffffff", "#e06666"])
 
-# 3. White-Green (For Volumes like Points: More is better, no "bad" red)
-custom_wgn = LinearSegmentedColormap.from_list("wgn", ["#ffffff", "#99ff99"])
+# 2. Red-White-Blue (Inverted: For Turnovers - High TOs is Red/Danger)
+custom_redblue = LinearSegmentedColormap.from_list("redblue", ["#e06666", "#ffffff", "#6fa8dc"])
+
+# 3. White-Red (For Volumes: Shows intensity without "bad" blue)
+custom_wred = LinearSegmentedColormap.from_list("wred", ["#ffffff", "#e06666"])
 def clean_num(val):
     if pd.isna(val) or val == "" or val == "-": return 0.0
     try: return float(val)
@@ -771,22 +774,26 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
         st.warning(f"No player data found for {title}")
         return
 
+    # 1. SETUP COLUMN KEYS
     col_map = {c.upper(): c for c in df.columns}
     def get_col(name): return col_map.get(name.upper())
     p_col = get_col('Player')
 
-    # Replaced OR/100 with OR/40
     rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'eFG%', 'TO%', 'OR/40', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     available_sorts = [s for s in rankable_metrics if get_col(s) is not None]
 
+    # 2. SELECT SORTING
     sort_key = f"sort_box_{title.replace(' ', '_')}"
     sel_c1, sel_c2 = st.columns([1, 3])
     with sel_c1:
         chosen_sort = st.selectbox("Rank By:", available_sorts, key=sort_key)
 
     actual_sort_col = get_col(chosen_sort)
-    df_sorted = df.sort_values(actual_sort_col, ascending=False).copy()
+    # Sort: Lower is better for TO%, otherwise Higher is better
+    is_ascending = True if chosen_sort == 'TO%' else False
+    df_sorted = df.sort_values(actual_sort_col, ascending=is_ascending).copy()
 
+    # 3. ORGANIZE ROWS (Humans then Team Totals)
     is_team_mask = df_sorted[p_col].str.contains('TEAM|EQUIP|TOTAL', case=False, na=False)
     df_humans = df_sorted[~is_team_mask].copy()
     df_team_row = df_sorted[is_team_mask].copy()
@@ -795,14 +802,13 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     df_team_row.insert(0, 'Pos', 0)
     df_final = pd.concat([df_humans, df_team_row])
 
+    # 4. BUILD COLUMN LIST
     cols_to_show = ['Pos', p_col]
     if get_col('Team_Name'): cols_to_show.append(get_col('Team_Name'))
     if get_col('GP'): cols_to_show.append(get_col('GP'))
+    
+    if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
 
-    main_impact = get_col('Total_NP')
-    if main_impact: cols_to_show.append(main_impact)
-
-    # Replaced OR/100 with OR/40
     classic_cols = ['PTS', 'eFG%', 'TO%', 'OR/40', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     for c in classic_cols:
         actual_c = get_col(c)
@@ -810,17 +816,11 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
             cols_to_show.append(actual_c)
 
     def add_factor_group(factor_name):
-        net = get_col(f'Net_{factor_name}')
-        off = get_col(f'Off_{factor_name}')
-        dfn = get_col(f'Def_{factor_name}')
-
-        if net and net not in cols_to_show:
-            cols_to_show.append(net)
-
+        net, off, dfn = get_col(f'Net_{factor_name}'), get_col(f'Off_{factor_name}'), get_col(f'Def_{factor_name}')
+        if net and net not in cols_to_show: cols_to_show.append(net)
         if show_off_def:
             if off: cols_to_show.append(off)
             if dfn: cols_to_show.append(dfn)
-
         if factor_name == 'Shooting' and show_shooting:
             for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
                 c = get_col(shot)
@@ -829,8 +829,10 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     for f in ['Shooting', 'TOV', 'ORB', 'FT']:
         add_factor_group(f)
 
+    # Filter columns that actually exist
     cols_to_show = [c for i, c in enumerate(cols_to_show) if c in df_final.columns and c not in cols_to_show[:i]]
-
+    
+    # 5. PREPARE FORMATTING
     text_cols = ['Pos', p_col, get_col('Team_Name'), get_col('Team'), get_col('GP')]
     numeric_cols = [c for c in cols_to_show if c not in text_cols]
 
@@ -840,47 +842,53 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
             format_map[col] = "{:.1%}" if '%' in col else "{:.3f}"
         elif col.upper() in [c.upper() for c in classic_cols]:
             format_map[col] = "{:.2f}"
-        else:
-            format_map[col] = "{:+.2f}"
+        else: format_map[col] = "{:+.2f}"
     format_map['Pos'] = "{:.0f}"
     if get_col('GP') in df_final.columns: format_map[get_col('GP')] = "{:.0f}"
 
-    styler = df_final[cols_to_show].style.format(format_map)
-    styler = styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
-    styler = styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
+    # 6. INITIALIZE STYLER (The "Unbound" Fix)
+    # We create the 'scouting_styler' here. It is now impossible for it to be undefined later.
+    scouting_styler = df_final[cols_to_show].style.format(format_map)
+    
+    # Baseline styling
+    scouting_styler = scouting_styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
+    scouting_styler = scouting_styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
 
+    # 7. APPLY DYNAMIC GRADIENTS (Thermal Blue-Red)
     for col in numeric_cols:
-        if col.upper() in [c.upper() for c in classic_cols]:
-            if col.upper() == 'TO%':
-                styler = styler.background_gradient(cmap=custom_gnwr, subset=[col])
-            elif col.upper() in ['PTS', 'OR/40', 'PTS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK']:
-                styler = styler.background_gradient(cmap=custom_wgn, subset=[col])
+        # Dynamic Focus: Only color the column we are currently sorting by
+        if col == actual_sort_col:
+            if col.upper() in [c.upper() for c in classic_cols]:
+                if col.upper() == 'TO%':
+                    scouting_styler = scouting_styler.background_gradient(cmap=custom_redblue, subset=[col])
+                elif col.upper() in ['PTS', 'OR/40', 'PTS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK', 'F2M', 'F2A', 'F3M', 'F3A']:
+                    scouting_styler = scouting_styler.background_gradient(cmap=custom_wred, subset=[col])
+                else:
+                    scouting_styler = scouting_styler.background_gradient(cmap=custom_bluered, subset=[col])
             else:
-                styler = styler.background_gradient(cmap=custom_rdwgn, subset=[col])
+                # Net Points (Centered at 0)
+                v_max = df_final[col].abs().max()
+                v_max = max(v_max, 1.0)
+                scouting_styler = scouting_styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=-v_max, vmax=v_max)
         else:
-            v_max = df_final[col].abs().max()
-            v_max = max(v_max, 1.0)
-            styler = styler.background_gradient(cmap=custom_rdwgn, subset=[col], vmin=-v_max, vmax=v_max)
+            # All other columns stay white/clean
+            continue
 
-    # --- THE MAGIC FIX: DYNAMIC HEIGHT & COLUMN WIDTHS ---
+    # 8. RENDER
     dynamic_height = (len(df_final) * 36) + 45
-
-    # 1. Start with the base column configuration
     col_config = {
         "Pos": st.column_config.NumberColumn("Pos", width="small"), 
         p_col: st.column_config.TextColumn("Player", width="medium")
     }
-    
-    # 2. Force every single numeric column to be "small" so they don't stretch
     for col in numeric_cols:
         col_config[col] = st.column_config.NumberColumn(col, width="small")
 
     st.dataframe(
-        styler, 
-        use_container_width=False, # Keeps it looking nice on screen
+        scouting_styler, 
+        use_container_width=False, 
         hide_index=True, 
         height=dynamic_height, 
-        column_config=col_config  # Applies our strict column widths
+        column_config=col_config
     )
 def get_teams_in_league(league, season): # Added season param
     teams = set()
@@ -924,6 +932,24 @@ def get_4f_percentages(stats, opp_stats=None):
         "ORB%": orb_pct, 
         "FTR": ft_rate  # Standardized key name
     }
+def to_per_100(stats):
+    """Pace-adjusts situational stats to Per 100 Possessions"""
+    if not stats: return {}
+    
+    # Calculate estimated possessions
+    fga = stats.get('f2a', 0) + stats.get('f3a', 0)
+    poss = fga + 0.44 * stats.get('fta', 0) - stats.get('orb', 0) + stats.get('tov', 0)
+    
+    if poss <= 0: return stats # Safety fallback
+    
+    # Create a copy and apply the multiplier to the situational fields
+    multiplier = 100 / poss
+    adj = stats.copy()
+    adj['pts_off_to'] = stats.get('pts_off_to', 0) * multiplier
+    adj['pts_2nd_ch'] = stats.get('pts_2nd_ch', 0) * multiplier
+    adj['pts_fb'] = stats.get('pts_fb', 0) * multiplier
+    
+    return adj
 def get_raw_game_data_custom(file_path):
     df = pd.read_excel(file_path, header=None)
     total_rows = df[df[0] == "TOTAL"]
@@ -1134,7 +1160,7 @@ def plot_4f_comparison(data_l, data_r, team_l, team_r, is_pdf=False):
     return fig
 
 def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
-    labels = ["Pts off TO", "2nd Chance Pts", "Fast Break Pts"]
+    labels = ["Pts off TO (Per 100)", "2nd Chance (Per 100)", "Fast Break (Per 100)"]
     
     # Helper to ensure we have numbers
     def safe_get(d, key):
@@ -1188,7 +1214,7 @@ def plot_situational_comparison(t1_stats, t2_stats, t1_name, t2_name, lg_stats):
 
     # --- DYNAMIC RANGE ---
     max_val = max(max(vals_t1 + vals_t2 + [10]), 15)
-    x_range_max = max_val * 1.15
+    x_range_max = max_val * 1.25
 
     fig.update_layout(
         barmode='group', 
@@ -1488,28 +1514,42 @@ with st.sidebar.expander("System & Benchmarks", expanded=False):
         st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
 
 # --- NEW LOGIC FOR TEAM VS LEAGUE ---
+# --- NEW LOGIC FOR TEAM VS LEAGUE (NOW SUPPORTS TEAM VS TEAM) ---
 if mode == "Season Aggregates per Team":
     teams = get_teams_in_league(league, season)
+    
+    # UI: Select Team 1 and Team 2 (Defaulting to League Average)
     t1 = sidebar_filters.selectbox("Select Team", teams, index=0, key="t1_agg")
-    # We get the max games from the team stats so the slider range is dynamic
+    t2_options = ["League Average"] + teams
+    t2 = sidebar_filters.selectbox("Compare With", t2_options, index=0, key="t2_agg")
+    
+    # Calculate Team 1 
     t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
     max_gp_possible = int(t1_off.get('gp', 1))
-    t2 = "League Average"
-    
     t1_def = get_per_game_volumes(t1, league, season, "Rival")
-    t2_off, t2_def = lg_data.copy(), lg_data.copy()
     
     lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
     t1_off_raw = calc_raw_factors(t1_off, t1_def['drb'], lg_effic, lg_orb_pct)
     t1_def_raw = calc_raw_factors(t1_def, t1_off['drb'], lg_effic, lg_orb_pct)
     
-    # Calculate Net vs League (These are already averages)
     i1_tot = {k: (t1_off_raw[k] - lg_raw[k]) + (lg_raw[k] - t1_def_raw[k]) for k in lg_raw}
-    i2_tot = {k: 0.0 for k in lg_raw}
-    i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (lg_raw, lg_raw)
     
-    header_title = f"Team Profile: {t1}"
-    pass
+    # Calculate Team 2 (or keep as 0.0 baseline if League Average is selected)
+    if t2 == "League Average":
+        t2_off, t2_def = lg_data.copy(), lg_data.copy()
+        i2_tot = {k: 0.0 for k in lg_raw}
+        i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (lg_raw, lg_raw)
+        header_title = f"Season Profile: {t1} vs League Average"
+    else:
+        t2_off = get_per_game_volumes(t2, league, season, "TOTAL")
+        t2_def = get_per_game_volumes(t2, league, season, "Rival")
+        
+        t2_off_raw = calc_raw_factors(t2_off, t2_def['drb'], lg_effic, lg_orb_pct)
+        t2_def_raw = calc_raw_factors(t2_def, t2_off['drb'], lg_effic, lg_orb_pct)
+        
+        i2_tot = {k: (t2_off_raw[k] - lg_raw[k]) + (lg_raw[k] - t2_def_raw[k]) for k in lg_raw}
+        i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
+        header_title = f"Season Profile: {t1} vs {t2}"
 
 # --- 2. MODE: HEAD TO HEAD MATCHUP (Team A vs Team B Sum) ---
 elif mode == "Head to Head Matchup":
@@ -1569,10 +1609,7 @@ elif mode == "Head to Head Matchup":
     t1_off, t2_off = t1_h2h_avg, t2_h2h_avg 
     i1_raw, i2_raw = (i1_tot, i1_tot), (i2_tot, i2_tot)
     header_title = f"H2H Profile: {t1} vs {t2} (Average per Game)"
-
 elif mode == "Team Performance by Game":
-    view_type = "Net Impact" 
-
     # 1. SIDEBAR SELECTIONS
     phases_avail = sorted(df_league['phase'].unique())
     sel_phase = sidebar_filters.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
@@ -1582,317 +1619,277 @@ elif mode == "Team Performance by Game":
     
     if not teams_in_phase:
         st.sidebar.warning("No teams found for this phase.")
-        st.stop()
+    else:
+        target_team = sidebar_filters.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
+
+        # 2. DATA PREPARATION
+        df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
+                            ((df_league['t1'] == target_team) | (df_league['t2'] == target_team))].copy()
         
-    target_team = sidebar_filters.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
-
-    # 2. DATA PREPARATION
-    df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
-                        ((df_league['t1'] == target_team) | (df_league['t2'] == target_team))].copy()
-    
-    if df_team.empty:
-        st.error("No games found for this team in the selected phase.")
-        st.stop()
-
-    df_team['is_win'] = df_team.apply(lambda x: (x['pts1'] > x['pts2'] if x['t1'] == target_team else x['pts2'] > x['pts1']), axis=1)
-    df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
-    df_team['opponent'] = df_team.apply(lambda x: x['t2'] if x['t1'] == target_team else x['t1'], axis=1)
-
-    all_opponents = sorted(list(set(df_team['opponent'].unique())))
-
-    # --- RESET LOGIC ---
-    current_context = f"{league}_{season}_{sel_phase}_{target_team}"
-    if st.session_state.get("last_context") != current_context:
-        st.session_state["perf_res_choice"] = ["Win", "Loss"]
-        st.session_state["perf_venue_choice"] = ["Home", "Away"]
-        if "perf_range_rnds" in st.session_state: del st.session_state["perf_range_rnds"]
-        st.session_state["last_context"] = current_context
-        st.rerun()
-
-    # 3. HEADER DISPLAY
-    st.markdown("---")
-    perf_header_col1, perf_header_col2 = st.columns([1, 5])
-    with perf_header_col1:
-        team_logo = get_team_icon(target_team, league)
-        if team_logo:
-            st.image(team_logo, width=120)
-    with perf_header_col2:
-        st.markdown(f'<h2 style="margin: 0; font-size: 1.6rem; line-height: 1.2; color: #1e2130;">Scouting Report: {target_team}</h2>', unsafe_allow_html=True)
-        st.markdown(f"### {analysis_type}")
-        st.markdown(f"**{sel_phase}**")
-        st.caption(f"Season: {season}")
-
-    # 4. MAIN PAGE FILTERS
-    with st.expander("Filter Games", expanded=True):
-        f_col1, f_col2 = st.columns(2)
-        with f_col1:
-            res_choice = st.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
-        with f_col2:
-            venue_choice = st.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
-        
-        all_rnds = sorted(df_team['round'].unique())
-        range_rnds = st.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
-        
-        with st.expander("Refine Rivals", expanded=False):
-            select_all = st.checkbox("All Rivals", value=True, key="sel_all_rivals")
-            if select_all:
-                rival_choice = st.multiselect("Specific Rivals:", all_opponents, default=all_opponents, key="perf_rival_choice")
-            else:
-                rival_choice = st.multiselect("Specific Rivals:", all_opponents, key="perf_rival_choice")
-    st.markdown("---")
-
-    # 5. FILTERING LOGIC
-    allowed_wins = [True if r == "Win" else False for r in res_choice]
-    start_idx = all_rnds.index(range_rnds[0])
-    end_idx = all_rnds.index(range_rnds[1])
-    allowed_range = all_rnds[start_idx : end_idx+1]
-
-    df_filtered = df_team[
-        (df_team['is_win'].isin(allowed_wins)) & 
-        (df_team['venue'].isin(venue_choice)) & 
-        (df_team['round'].isin(allowed_range)) &
-        (df_team['opponent'].isin(rival_choice))
-    ].copy()
-
-    if df_filtered.empty:
-        st.error("No games match this filter combination.")
-        st.stop()
-
-    # --- TAB SYSTEM ---
-    tab_team_view, tab_player_view = st.tabs(["Team Performance", "Player Performance"])
-
-    with tab_team_view:
-        view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key="perf_view_type_team")
-        
-        performance_data = []
-        for _, row in df_filtered.sort_values('round').iterrows():
-            g = get_raw_game_data_custom(row['path'])
-            if not g: continue
-            is_t1 = row['t1'] == target_team
-            stats_self, stats_opp = (g['t1_stats'], g['t2_stats']) if is_t1 else (g['t2_stats'], g['t1_stats'])
-            opp_name = row['opponent']
-            self_score = row['pts1'] if is_t1 else row['pts2']
-            opp_score = row['pts2'] if is_t1 else row['pts1']
-            
-            entry = {"Round": row['round'], "Opp_Logo": get_team_icon(opp_name, league), "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} {self_score}-{opp_score} vs {opp_name}", "Outcome": "W" if row['is_win'] else "L"}
-            f_off = calc_raw_factors(stats_self, stats_opp['drb'], lg_effic, lg_orb_pct)
-            f_def = calc_raw_factors(stats_opp, stats_self['drb'], lg_effic, lg_orb_pct)
-            f_def_inv = {k: -v for k, v in f_def.items()} 
-            for f in ["Shooting", "Rebounding", "Turnovers", "Free Throws"]:
-                entry[f"{f}_Net"] = f_off[f] + f_def_inv[f]
-                entry[f"{f}_Off"] = f_off[f]
-                entry[f"{f}_Def"] = f_def_inv[f]
-
-            if analysis_type == "4-Factors Net Points":
-                display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
-                entry.update({"Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'], "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'], "Total 4F": sum(display_vals.values())})
-            else:
-                p_self = get_4f_percentages(stats_self, stats_opp)
-                p_opp = get_4f_percentages(stats_opp, stats_self)
-                if view_type == "Offensive Impact":
-                    entry.update({"Pts off TO": stats_self['pts_off_to'], "2nd Chance": stats_self['pts_2nd_ch'], "Fast Break": stats_self['pts_fb']})
-                    entry.update(p_self)
-                elif view_type == "Defensive Impact":
-                    entry.update({"Pts off TO": stats_opp['pts_off_to'], "2nd Chance": stats_opp['pts_2nd_ch'], "Fast Break": stats_opp['pts_fb']})
-                    entry.update(p_opp)
-                else:
-                    entry.update({"Pts off TO": stats_self['pts_off_to'] - stats_opp['pts_off_to'], "2nd Chance": stats_self['pts_2nd_ch'] - stats_opp['pts_2nd_ch'], "Fast Break": stats_self['pts_fb'] - stats_opp['pts_fb']})
-                    p_net = {k: p_self[k] - p_opp[k] for k in p_self}
-                    entry.update(p_net)
-            performance_data.append(entry)
-
-        perf_df = pd.DataFrame(performance_data)
-        
-        c_s, c_r, c_t, c_f = st.columns(4)
-        if analysis_type == "4-Factors Net Points":
-            for f_n, col in zip(["Shooting", "Rebounding", "Turnovers", "Free Throws"], [c_s, c_r, c_t, c_f]):
-                with col:
-                    st.markdown(f"#### {f_n}")
-                    st.markdown(f"**Net: {perf_df[f_n+'_Net'].mean():+.2f}**")
-                    st.caption(f"O: {perf_df[f_n+'_Off'].mean():+.2f} | D: {perf_df[f_n+'_Def'].mean():+.2f}")
+        if df_team.empty:
+            st.error("No games found for this team in the selected phase.")
         else:
-            sit_labels = ["Pts off TO", "2nd Chance", "Fast Break", "GP"]
-            sit_cols = ["Pts off TO", "2nd Chance", "Fast Break", "Round"]
-            for label, col_name, col_ui in zip(sit_labels, sit_cols, [c_s, c_r, c_t, c_f]):
-                with col_ui:
-                    st.markdown(f"#### {label}")
-                    if label == "GP": st.markdown(f"**{len(perf_df)} Games**")
-                    else:
-                        avg_val = perf_df[col_name].mean()
-                        fmt = "{:+.2f}" if view_type == "Net Impact" else "{:.2f}"
-                        st.markdown(f"**Avg: {fmt.format(avg_val)}**")
+            df_team['is_win'] = df_team.apply(lambda x: (x['pts1'] > x['pts2'] if x['t1'] == target_team else x['pts2'] > x['pts1']), axis=1)
+            df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
+            df_team['opponent'] = df_team.apply(lambda x: x['t2'] if x['t1'] == target_team else x['t1'], axis=1)
 
-        if analysis_type == "4-Factors Net Points":
-            cols_visible = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-            format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]}
-            grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-        else:
-            cols_visible = ["Round", "Opp_Logo", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
-            if view_type == "Net Impact":
-                format_dict = {k: "{:+.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
-                format_dict.update({k: "{:+.1%}" for k in ["eFG%", "TO%", "ORB%"]})
-                format_dict["FTR"] = "{:+.3f}"
-            else:
-                format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
-                format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
-                format_dict["FTR"] = "{:.3f}"
-            grad_cols = [c for c in cols_visible if c not in ["Pos", "Team_Logo", "Team"]]
+            all_opponents = sorted(list(set(df_team['opponent'].unique())))
 
-        styler = perf_df.style.format(format_dict).map(lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), subset=['Outcome'])
-        if analysis_type == "4-Factors Net Points":
-            styler = styler.background_gradient(subset=grad_cols, cmap=custom_rdwgn, vmin=-15, vmax=15)
-        else:
-            if view_type == "Net Impact":
-                styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_rdwgn, vmin=-15, vmax=15)
-                styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=-0.12, vmax=0.12)
-                styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=-0.15, vmax=0.15)
-                styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=-0.15, vmax=0.15)
-                styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=-0.06, vmax=0.06)
-            else:
-                styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wgn, vmin=0, vmax=30)
-                styler = styler.background_gradient(subset=['eFG%'], cmap=custom_rdwgn, vmin=avg_efg-0.12, vmax=avg_efg+0.12)
-                styler = styler.background_gradient(subset=['ORB%'], cmap=custom_rdwgn, vmin=avg_orb-0.15, vmax=avg_orb+0.15)
-                styler = styler.background_gradient(subset=['FTR'], cmap=custom_rdwgn, vmin=avg_ftr-0.15, vmax=avg_ftr+0.15)
-                styler = styler.background_gradient(subset=['TO%'], cmap=custom_gnwr, vmin=avg_to-0.06, vmax=avg_to+0.06)
+            # --- RESET LOGIC ---
+            current_context = f"{league}_{season}_{sel_phase}_{target_team}"
+            if st.session_state.get("last_context") != current_context:
+                st.session_state["perf_res_choice"] = ["Win", "Loss"]
+                st.session_state["perf_venue_choice"] = ["Home", "Away"]
+                if "perf_range_rnds" in st.session_state: del st.session_state["perf_range_rnds"]
+                st.session_state["last_context"] = current_context
+                st.rerun()
 
-        # --- CAREFULLY INDENTED RENDER BLOCK ---
-        dynamic_height_team = (len(perf_df) * 36) + 45
-        
-        col_config_team = {
-            "Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), 
-            "Round": st.column_config.TextColumn("Rnd", width="small"),
-            "Matchup": st.column_config.TextColumn("Matchup", width="medium")
-        }
-        
-        for col in cols_visible:
-            if col not in ["Round", "Opp_Logo", "Matchup", "Outcome"]:
-                col_config_team[col] = st.column_config.NumberColumn(col, width="small")
+            # 3. HEADER DISPLAY
+            st.markdown("---")
+            perf_header_col1, perf_header_col2 = st.columns([1, 5])
+            with perf_header_col1:
+                team_logo = get_team_icon(target_team, league)
+                if team_logo: st.image(team_logo, width=120)
+            with perf_header_col2:
+                st.markdown(f'<h2 style="margin: 0; font-size: 1.6rem; line-height: 1.2; color: #1e2130;">Scouting Report: {target_team}</h2>', unsafe_allow_html=True)
+                st.markdown(f"### {analysis_type} | **{sel_phase}**")
+                st.caption(f"Season: {season}")
 
-        st.dataframe(
-            styler, 
-            use_container_width=False, 
-            hide_index=True, 
-            height=dynamic_height_team,
-            column_order=cols_visible, 
-            column_config=col_config_team
-        )
-
-    with tab_player_view:
-        # 1. Player List
-        if analysis_type == "4-Factors Net Points":
-            df_ind_agg = load_individual_aggregate(target_team, league, season, sel_phase)
-        else:
-            df_ind_agg = load_aggregated_classic_individual_data(target_team, league, season, sel_phase)
-            
-        if df_ind_agg is None or df_ind_agg.empty:
-            st.warning("No individual player data found for this team.")
-        else:
-            agg_p_col = next((c for c in df_ind_agg.columns if c.upper() == 'PLAYER'), 'Player')
-            player_list = sorted(df_ind_agg[agg_p_col].unique().tolist())
-
-            col_sel, col_view = st.columns([1, 3])
-            with col_sel:
-                selected_player = st.selectbox("Select Player", player_list)
-            with col_view:
-                if analysis_type == "4-Factors Net Points":
-                    player_view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key="perf_view_type_player")
-
-            if analysis_type == "4-Factors Net Points":
-                col_cb1, col_cb2 = st.columns(2)
-                with col_cb1: exp_p_offdef = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_perf_p")
-                with col_cb2: exp_p_shoot = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_perf_p")
-                prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
-
+            # 4. MAIN PAGE FILTERS
+            with st.expander("Filter Games", expanded=True):
+                f_col1, f_col2 = st.columns(2)
+                with f_col1: res_choice = st.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
+                with f_col2: venue_choice = st.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
+                
+                all_rnds = sorted(df_team['round'].unique())
+                range_rnds = st.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
+                
+                with st.expander("Refine Rivals", expanded=False):
+                    select_all = st.checkbox("All Rivals", value=True, key="sel_all_rivals")
+                    rival_choice = st.multiselect("Specific Rivals:", all_opponents, default=all_opponents if select_all else [], key="perf_rival_choice")
             st.markdown("---")
 
-            # 2. DATA LOOP
-            player_perf_data = []
-            for _, row in df_filtered.sort_values('round').iterrows():
-                if analysis_type == "4-Factors Net Points":
-                    df_game_ind = load_single_game_individual(row['path'], target_team)
-                else:
-                    df_game_ind = load_single_game_classic_individual(row['path'], target_team)
-                    
-                if df_game_ind is not None and not df_game_ind.empty:
-                    p_col_in_game = next((c for c in df_game_ind.columns if c.upper() == 'PLAYER'), None)
-                    if p_col_in_game:
-                        p_row = df_game_ind[df_game_ind[p_col_in_game].str.contains(selected_player, case=False, na=False, regex=False)]
-                        if not p_row.empty:
-                            p_stats = p_row.iloc[0].to_dict()
-                            p_stats['Round'] = row['round']
-                            p_stats['Opp_Logo'] = get_team_icon(row['opponent'], league)
-                            p_stats['Matchup'] = f"{'W' if row['is_win'] else 'L'} {row['opponent']}"
-                            player_perf_data.append(p_stats)
+            # 5. FILTERING LOGIC
+            allowed_wins = [True if r == "Win" else False for r in res_choice]
+            start_idx, end_idx = all_rnds.index(range_rnds[0]), all_rnds.index(range_rnds[1])
+            allowed_range = all_rnds[start_idx : end_idx+1]
 
-            # 3. RENDER LOGIC (Safely inside the else block)
-            if not player_perf_data:
-                st.info(f"No records found for {selected_player} in the selected games.")
+            df_filtered = df_team[
+                (df_team['is_win'].isin(allowed_wins)) & 
+                (df_team['venue'].isin(venue_choice)) & 
+                (df_team['round'].isin(allowed_range)) &
+                (df_team['opponent'].isin(rival_choice))
+            ].copy()
+
+            if df_filtered.empty:
+                st.error("No games match this filter combination.")
             else:
-                player_df = pd.DataFrame(player_perf_data)
+                # --- TAB SYSTEM ---
+                tab_team_view, tab_player_view = st.tabs(["Team Performance", "Player Performance"])
 
-                cols_to_show = ["Round", "Opp_Logo", "Matchup"]
-                
-                if analysis_type == "4-Factors Net Points":
-                    for f in ["Shooting", "TOV", "ORB", "FT"]:
-                        target_f = f"{prefix}{f}" if f"{prefix}{f}" in player_df.columns else f
-                        if target_f in player_df.columns: cols_to_show.append(target_f)
+                with tab_team_view:
+                    view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key="perf_view_type_team")
+                    if analysis_type == "4-Factors Classic ":
+                        st.caption("**Note:** Situational points (Fast Break, 2nd Chance, TO-Pts) are standardized to **Per 100 Possessions** to compare performance across different game paces.")
+                    performance_data = []
+                    for _, row in df_filtered.sort_values('round').iterrows():
+                        g = get_raw_game_data_custom(row['path'])
+                        if not g: continue
+                        is_t1 = row['t1'] == target_team
+                        stats_self, stats_opp = (g['t1_stats'], g['t2_stats']) if is_t1 else (g['t2_stats'], g['t1_stats'])
+                        
+                        entry = {"Round": row['round'], "Opp_Logo": get_team_icon(row['opponent'], league), "Matchup": f"{'W' if row['is_win'] else 'L'} {'(H)' if row['venue']=='Home' else '(A)'} {row['pts1'] if is_t1 else row['pts2']}-{row['pts2'] if is_t1 else row['pts1']} vs {row['opponent']}", "Outcome": "W" if row['is_win'] else "L"}
+                        
+                        # 4F Math
+                        f_off = calc_raw_factors(stats_self, stats_opp['drb'], lg_effic, lg_orb_pct)
+                        f_def = calc_raw_factors(stats_opp, stats_self['drb'], lg_effic, lg_orb_pct)
+                        f_def_inv = {k: -v for k, v in f_def.items()} 
+                        for f in ["Shooting", "Rebounding", "Turnovers", "Free Throws"]:
+                            entry[f"{f}_Net"], entry[f"{f}_Off"], entry[f"{f}_Def"] = f_off[f] + f_def_inv[f], f_off[f], f_def_inv[f]
+
+                        if analysis_type == "4-Factors Net Points":
+                            display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
+                            entry.update({"Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'], "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'], "Total 4F": sum(display_vals.values())})
+                        else:
+                            # PACE ADJUSTMENT FOR PERFORMANCE TRENDS
+                            def get_adj_stats(s):
+                                fga = s.get('f2a',0) + s.get('f3a',0)
+                                poss = fga + 0.44*s.get('fta',0) + s.get('tov',0) - s.get('orb',0)
+                                mult = 100/poss if poss > 0 else 1
+                                return {
+                                    "Pts off TO": s.get('pts_off_to', 0) * mult,
+                                    "2nd Chance": s.get('pts_2nd_ch', 0) * mult,
+                                    "Fast Break": s.get('pts_fb', 0) * mult
+                                }
+                            
+                            p_self, p_opp = get_4f_percentages(stats_self, stats_opp), get_4f_percentages(stats_opp, stats_self)
+                            s_adj = get_adj_stats(stats_self)
+                            o_adj = get_adj_stats(stats_opp)
+
+                            if view_type == "Offensive Impact":
+                                entry.update({**s_adj, **p_self})
+                            elif view_type == "Defensive Impact":
+                                entry.update({**o_adj, **p_opp})
+                            else:
+                                entry.update({
+                                    "Pts off TO": s_adj['Pts off TO'] - o_adj['Pts off TO'],
+                                    "2nd Chance": s_adj['2nd Chance'] - o_adj['2nd Chance'],
+                                    "Fast Break": s_adj['Fast Break'] - o_adj['Fast Break']
+                                })
+                                entry.update({k: p_self[k] - p_opp[k] for k in p_self})
+                        performance_data.append(entry)
+
+                    perf_df = pd.DataFrame(performance_data)
                     
-                    if exp_p_offdef:
-                        for f in ["Shooting", "TOV", "ORB", "FT"]:
-                            for alt in [f"Net_{f}", f"Off_{f}", f"Def_{f}"]:
-                                if alt in player_df.columns and alt not in cols_to_show: cols_to_show.append(alt)
-                    
-                    if exp_p_shoot:
-                        for s in ["Off_2P", "Off_3P", "Def_2P", "Def_3P"]:
-                            if s in player_df.columns and s not in cols_to_show: cols_to_show.append(s)
-                else:
-                    for c in ["PTS", "eFG%", "TO%", "OR/40", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]:
-                        if c in player_df.columns: cols_to_show.append(c)
-
-                cols_to_show = [c for c in cols_to_show if c in player_df.columns]
-                numeric_cols = [c for c in cols_to_show if c not in ["Round", "Opp_Logo", "Matchup"]]
-
-                format_dict = {}
-                for k in numeric_cols:
-                    if '%' in k or k == 'FTR': format_dict[k] = "{:.1%}" if '%' in k else "{:.3f}"
-                    elif k in ["PTS", "OR/40", "Pts_off_TO", "2nd_Chance", "Fast_Break"]: format_dict[k] = "{:.2f}"
-                    else: format_dict[k] = "{:+.2f}"
-
-                styler_p = player_df[cols_to_show].style.format(format_dict)
-                
-                for col in numeric_cols:
-                    if col in ["PTS", "eFG%", "TO%", "OR/40", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]:
-                        if col == 'TO%': cmap = custom_gnwr
-                        elif col in ['PTS', 'OR/40', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']: cmap = custom_wgn
-                        else: cmap = custom_rdwgn
-                        styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
+                    # --- DEFINE FORMATTING VARIABLES ---
+                    if analysis_type == "4-Factors Net Points":
+                        cols_visible = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
+                        format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]}
+                        grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
                     else:
-                        v_max = player_df[col].abs().max() if not player_df[col].empty else 1.0
-                        v_max = max(v_max, 1.0)
-                        styler_p = styler_p.background_gradient(subset=[col], cmap=custom_rdwgn, vmin=-v_max, vmax=v_max)
+                        cols_visible = ["Round", "Opp_Logo", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+                        grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+                        if view_type == "Net Impact":
+                            format_dict = {k: "{:+.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+                            format_dict.update({k: "{:+.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+                            format_dict["FTR"] = "{:+.3f}"
+                        else:
+                            format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
+                            format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
+                            format_dict["FTR"] = "{:.3f}"
 
-                # --- THE MAGIC FIX FOR PLAYER VIEW (Team Performance by Game) ---
-                dynamic_height_p = (len(player_df) * 36) + 45
-                
-                # Base config for text/images
-                col_config_p = {
-                    "Opp_Logo": st.column_config.ImageColumn("Opp", width="small"),
-                    "Round": st.column_config.TextColumn("Round", width="small"),
-                    "Matchup": st.column_config.TextColumn("Matchup", width="medium")
-                }
-                
-                # Force all numeric data columns to be compact
-                for col in numeric_cols:
-                    col_config_p[col] = st.column_config.NumberColumn(col, width="small")
+                    styler = perf_df.style.format(format_dict).map(lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), subset=['Outcome'])
+                    
+                    if analysis_type == "4-Factors Net Points":
+                        styler = perf_df.style.format(format_dict).map(
+                        lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), 
+                        subset=['Outcome']
+                    )
+                    
+                    if analysis_type == "4-Factors Net Points":
+                        # DYNAMIC FOCUS: Only highlight the 'Total 4F' column as the primary result
+                        # The individual factors (Shooting, etc.) remain clean for easier reading.
+                        styler = styler.background_gradient(subset=['Total 4F'], cmap=custom_bluered, vmin=-15, vmax=15)
+                    else:
+                        # DYNAMIC FOCUS: Highlight the key situational scoring outcomes
+                        if view_type == "Net Impact":
+                            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_bluered, vmin=-15, vmax=15)
+                        else:
+                            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wred, vmin=0, vmax=30)
 
-                # Render the compact table
-                st.dataframe(
-                    styler_p, 
-                    use_container_width=False,  # <-- Removes massive gaps
-                    hide_index=True, 
-                    height=dynamic_height_p,    # <-- Removes scrollbar
-                    column_config=col_config_p
-                )
+                    dynamic_height_team = (len(perf_df) * 36) + 45
+                    col_config_team = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
+                    for col in cols_visible:
+                        if col not in ["Round", "Opp_Logo", "Matchup"]: col_config_team[col] = st.column_config.NumberColumn(col, width="small")
+
+                    st.dataframe(styler, use_container_width=False, hide_index=True, height=dynamic_height_team, column_order=cols_visible, column_config=col_config_team)
+
+                with tab_player_view:
+                    # Logic for individual data gatherer
+                    if analysis_type == "4-Factors Net Points":
+                        df_ind_agg = load_individual_aggregate(target_team, league, season, sel_phase)
+                    else:
+                        df_ind_agg = load_aggregated_classic_individual_data(target_team, league, season, sel_phase)
+                    
+                    if df_ind_agg is not None and not df_ind_agg.empty:
+                        agg_p_col = next((c for c in df_ind_agg.columns if c.upper() == 'PLAYER'), 'Player')
+                        # Helper to strip leading numbers (12. P. ORIOLA -> P. ORIOLA)
+                        def clean_p_name(t): return re.sub(r'^\d+[\s\.\-]*', '', str(t).strip())
+                        # Build A-Z unique clean list
+                        player_list = sorted(list(set([
+                            clean_p_name(p) for p in df_ind_agg[agg_p_col].unique()
+                            if not any(x in str(p).upper() for x in ['TEAM', 'TOTAL', 'EQUIP'])
+                        ])))
+                        
+                        col_sel, col_view = st.columns([1, 3])
+                        with col_sel: selected_player = st.selectbox("Select Player", player_list, key=f"p_sel_{target_team}_{sel_phase}")
+                        with col_view:
+                            if analysis_type == "4-Factors Net Points":
+                                player_view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key=f"p_view_{target_team}")
+    
+                        # NEW: Add the checkboxes horizontally
+                        cb_col1, cb_col2 = st.columns(2)
+                        with cb_col1: 
+                            expand_off_def_perf = st.checkbox("Show Offense/Defense Breakdown", value=False, key=f"cb_offdef_perf_{target_team}_{sel_phase}") if analysis_type == "4-Factors Net Points" else False
+                        with cb_col2: 
+                            expand_shoot_perf = st.checkbox("Show 2P/3P Shooting Split", value=False, key=f"cb_shoot_perf_{target_team}_{sel_phase}")
+
+                        def is_player_match(n_in_game, n_target):
+                            if not n_in_game or not n_target: return False
+                            # Normalize both: strip numbers, remove dots/spaces, remove accents
+                            def sn(t):
+                                clean = clean_p_name(t)
+                                return re.sub(r'[\s\.]+', '', normalize_str(clean))
+                            return sn(n_in_game) == sn(n_target)
+
+                        player_perf_data = []
+                        for _, row in df_filtered.sort_values('round').iterrows():
+                            df_game_ind = load_single_game_individual(row['path'], target_team) if analysis_type == "4-Factors Net Points" else load_single_game_classic_individual(row['path'], target_team)
+                            if df_game_ind is not None and not df_game_ind.empty:
+                                g_p_col = next((c for c in df_game_ind.columns if c.upper() == 'PLAYER'), None)
+                                if g_p_col:
+                                    match_mask = [is_player_match(name, selected_player) for name in df_game_ind[g_p_col]]
+                                    p_game_row = df_game_ind[match_mask]
+                                    if not p_game_row.empty:
+                                        p_stats = p_game_row.iloc[0].to_dict()
+                                        p_stats['Round'], p_stats['Opp_Logo'], p_stats['Matchup'] = row['round'], get_team_icon(row['opponent'], league), f"{'W' if row['is_win'] else 'L'} {row['opponent']}"
+                                        player_perf_data.append(p_stats)
+
+                        else:
+                            player_df = pd.DataFrame(player_perf_data)
+                            p_cols = ["Round", "Opp_Logo", "Matchup"]
+                            
+                            if analysis_type == "4-Factors Net Points":
+                                prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
+                                p_numeric = [f"{prefix}{f}" for f in ["Shooting", "TOV", "ORB", "FT"] if f"{prefix}{f}" in player_df.columns]
+                                
+                                exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
+                                exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+
+                                if exp_off:
+                                    for f in ["Shooting", "TOV", "ORB", "FT"]:
+                                        if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
+                                        if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
+                                if exp_shoot:
+                                    for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
+                                        if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+                            else:
+                                p_numeric = ["PTS", "eFG%", "TO%", "OR/40", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
+                                exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+                                if exp_shoot:
+                                    for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
+                                        if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+                            
+                            p_cols += [c for c in p_numeric if c in player_df.columns]
+                            
+                            # --- NEW: DYNAMIC FOCUS FOR PLAYER TRENDS ---
+                            focus_col, _ = st.columns([1, 3])
+                            with focus_col:
+                                p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
+
+                            def get_col_format(col_name):
+                                if '%' in col_name: return "{:.1%}"
+                                if col_name == 'FTR': return "{:.3f}"
+                                if col_name in ['F2M', 'F2A', 'F3M', 'F3A']: return "{:.0f}"
+                                if analysis_type == "4-Factors Classic ": return "{:.2f}"
+                                return "{:+.2f}"
+
+                            p_format = {k: get_col_format(k) for k in p_numeric}
+                            styler_p = player_df[p_cols].style.format(p_format)
+                            
+                            # --- APPLY GRADIENT ONLY TO THE HIGHLIGHTED TREND ---
+                            for col in [c for c in p_numeric if c in player_df.columns]:
+                                if col == p_focus:
+                                    if 'TO%' in col: cmap = custom_redblue
+                                    elif any(x in col for x in ['PTS', 'OR/40', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
+                                        cmap = custom_wred
+                                    else: cmap = custom_bluered
+                                    styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
+
+                            dynamic_height_p = (len(player_df) * 36) + 45
+                            col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
+                            for c in p_numeric: col_config_p[c] = st.column_config.NumberColumn(c, width="small")
+                            st.dataframe(styler_p, use_container_width=False, hide_index=True, height=dynamic_height_p, column_config=col_config_p)
 
 elif mode == "Overall League Standings":
     # 1. Phase Selection
@@ -1916,15 +1913,21 @@ elif mode == "Overall League Standings":
 
     # --- 3. ALWAYS SHOW BOTH TABS ---
     tab_standings_team, tab_standings_players = st.tabs(["Team Standings", "Player Leaderboard"])
-    show_player_standings = True
-
+    
     with tab_standings_team:
-        # Calculation of benchmarks (Midpoints)
-        lg_fga = lg_data['f2a'] + lg_data['f3a']
-        avg_efg = (lg_data['f2m'] + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
-        avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if lg_fga > 0 else 0.15
-        avg_ftr = lg_data['fta'] / lg_fga if lg_fga > 0 else 0.25
-        avg_orb = lg_orb_pct
+        # PACE-ADJUSTMENT HELPER
+        def to_per_100_standings(stats):
+            if not stats: return stats
+            fga = stats.get('f2a', 0) + stats.get('f3a', 0)
+            poss = fga + 0.44 * stats.get('fta', 0) - stats.get('orb', 0) + stats.get('tov', 0)
+            mult = 100 / poss if poss > 0 else 1
+            res = stats.copy()
+            for k in ['pts_off_to', 'pts_2nd_ch', 'pts_fb']:
+                res[k] = res.get(k, 0) * mult
+            return res
+
+        if analysis_type == "4-Factors Classic ":
+            st.caption("**Note:** Situational points (Fast Break, 2nd Chance, TO-Pts) are standardized to **Per 100 Possessions** for fair league-wide ranking.")
 
         league_results = []
         with st.spinner("Calculating team standings..."):
@@ -1938,9 +1941,14 @@ elif mode == "Overall League Standings":
                 
                 if t_off['pts'] == 0: continue 
 
+                # Apply Pace Adjustment
+                t_off_adj = to_per_100_standings(t_off)
+                t_def_adj = to_per_100_standings(t_def)
+
                 entry = {"Team_Logo": get_team_icon(team, league), "Team": team}
 
                 if analysis_type == "4-Factors Net Points":
+                    # (Keep your existing Net Points logic exactly as it is...)
                     lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
                     t_off_raw = calc_raw_factors(t_off, t_def['drb'], lg_effic, lg_orb_pct)
                     t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
@@ -1955,19 +1963,21 @@ elif mode == "Overall League Standings":
                         "Rebounding": disp['Rebounding'], "Free Throws": disp['Free Throws'] 
                     })
                 else:
+                    # UPDATED CLASSIC LOGIC: Use the ADJ (Per 100) stats
                     p_off = get_4f_percentages(t_off, t_def)
                     p_def = get_4f_percentages(t_def, t_off)
+                    
                     if view_type == "Offensive Impact":
-                        entry.update({"Pts off TO": t_off['pts_off_to'], "2nd Chance": t_off['pts_2nd_ch'], "Fast Break": t_off['pts_fb']})
+                        entry.update({"Pts off TO": t_off_adj['pts_off_to'], "2nd Chance": t_off_adj['pts_2nd_ch'], "Fast Break": t_off_adj['pts_fb']})
                         entry.update(p_off)
                     elif view_type == "Defensive Impact":
-                        entry.update({"Pts off TO": t_def['pts_off_to'], "2nd Chance": t_def['pts_2nd_ch'], "Fast Break": t_def['pts_fb']})
+                        entry.update({"Pts off TO": t_def_adj['pts_off_to'], "2nd Chance": t_def_adj['pts_2nd_ch'], "Fast Break": t_def_adj['pts_fb']})
                         entry.update(p_def)
                     else:
                         entry.update({
-                            "Pts off TO": t_off['pts_off_to'] - t_def['pts_off_to'],
-                            "2nd Chance": t_off['pts_2nd_ch'] - t_def['pts_2nd_ch'],
-                            "Fast Break": t_off['pts_fb'] - t_def['pts_fb']
+                            "Pts off TO": t_off_adj['pts_off_to'] - t_def_adj['pts_off_to'],
+                            "2nd Chance": t_off_adj['pts_2nd_ch'] - t_def_adj['pts_2nd_ch'],
+                            "Fast Break": t_off_adj['pts_fb'] - t_def_adj['pts_fb']
                         })
                         p_net = {k: p_off[k] - p_def[k] for k in p_off}
                         entry.update(p_net)
@@ -1978,27 +1988,42 @@ elif mode == "Overall League Standings":
         else:
             standings_df = pd.DataFrame(league_results)
             
-            # 1. DYNAMIC SORT SELECTOR
+            # --- 1. DYNAMIC SORT SELECTOR ---
             if analysis_type == "4-Factors Net Points":
                 rank_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
             else:
-                rank_cols = ["eFG%", "Pts off TO", "2nd Chance", "Fast Break", "TO%", "ORB%", "FTR"]
+                # Matches the keys used in entry.update
+                rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
             
+            # Ensure we only show metrics that actually exist in our data
             available_ranks = [c for c in rank_cols if c in standings_df.columns]
             
             rank_c1, rank_c2 = st.columns([1, 3])
             with rank_c1:
                 chosen_team_rank = st.selectbox("Rank Teams By:", available_ranks, key="team_rank_sel")
             
-            # 2. SORT AND ASSIGN POS
-            standings_df = standings_df.sort_values(chosen_team_rank, ascending=False).copy()
+            # --- 2. INTELLIGENT SORTING ---
+            # For scouting: Higher is usually better, EXCEPT for Turnovers (Offensive) 
+            # and Points Allowed (Defensive).
+            is_ascending = False
+            if chosen_team_rank == "TO%" and view_type == "Offensive Impact":
+                is_ascending = True # Best team has the LOWEST turnover rate
+            if view_type == "Defensive Impact" and "Pts" in chosen_team_rank:
+                is_ascending = True # Best defense allows the LOWEST points
+
+            # Perform the sort
+            standings_df = standings_df.sort_values(by=chosen_team_rank, ascending=is_ascending).copy()
+            
+            # Reset the Position column based on the new sort
+            if "Pos" in standings_df.columns:
+                standings_df = standings_df.drop(columns=["Pos"])
             standings_df.insert(0, "Pos", range(1, len(standings_df) + 1))
 
-            # 3. DEFINE COLUMNS AND FORMATTING
+            # --- 3. DEFINE COLUMNS AND FORMATTING ---
             if analysis_type == "4-Factors Net Points":
-                cols_visible = ["Pos", "Team_Logo", "Team", "Net Points","Shooting", "Turnovers", "Rebounding", "Free Throws"]
-                format_dict = {k: "{:+.2f}" for k in ["Net Points","Shooting", "Turnovers", "Rebounding", "Free Throws"]}
-                grad_cols = ["Net Points","Shooting", "Turnovers", "Rebounding", "Free Throws"]
+                cols_visible = ["Pos", "Team_Logo", "Team", "Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
+                format_dict = {k: "{:+.2f}" for k in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]}
+                grad_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
             else:
                 cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
                 if view_type == "Net Impact":
@@ -2013,25 +2038,38 @@ elif mode == "Overall League Standings":
 
             format_dict["Pos"] = "{:.0f}"
 
-            # 4. APPLY STYLING
+            # --- 4. APPLY STYLING & GRADIENTS ---
             styler = standings_df[cols_visible].style.format(format_dict)
 
-            # APPLY GRADIENTS
             for col in grad_cols:
-                v_max = standings_df[col].abs().max()
-                v_max = max(v_max, 1.0)
-                cmap = custom_gnwr if "TO%" in col else custom_rdwgn
-                styler = styler.background_gradient(cmap=cmap, subset=[col], vmin=-v_max, vmax=v_max)
+                # DYNAMIC FOCUS: Only color the column the user selected to Rank by
+                if col == chosen_team_rank:
+                    if analysis_type == "4-Factors Net Points" or view_type == "Net Impact":
+                        v_max = standings_df[col].abs().max()
+                        v_max = max(v_max, 1.0)
+                        vmin, vmax = -v_max, v_max
+                        cmap = custom_redblue if "TO%" in col else custom_bluered
+                    else:
+                        # Volume logic for Offensive/Defensive ranks
+                        vmin, vmax = standings_df[col].min(), standings_df[col].max()
+                        if view_type == "Offensive Impact":
+                            cmap = custom_redblue if "TO%" in col else custom_bluered
+                        else:
+                            # Defensive: Low points allowed = Red (Hot Defense)
+                            if any(x in col for x in ["TO%", "ORB%"]):
+                                cmap = custom_bluered 
+                            else:
+                                cmap = custom_redblue 
+                    
+                    styler = styler.background_gradient(cmap=cmap, subset=[col], vmin=vmin, vmax=vmax)
 
-            # --- CAREFULLY INDENTED RENDER BLOCK ---
+            # --- 5. RENDER ---
             dynamic_height_standings = (len(standings_df) * 36) + 45
-            
             col_config_standings = {
                 "Team_Logo": st.column_config.ImageColumn(" ", width="small"), 
                 "Pos": st.column_config.NumberColumn("Pos", width="small"),
                 "Team": st.column_config.TextColumn("Team", width="medium")
             }
-            
             for col in cols_visible:
                 if col not in ["Pos", "Team_Logo", "Team"]:
                     col_config_standings[col] = st.column_config.NumberColumn(col, width="small")
@@ -2186,63 +2224,117 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
                 st.markdown("---")
 
             elif mode == "Season Aggregates per Team":
-                st.markdown("#### Team vs League Baseline (Net Points)")
-                t1_total_net = sum(i1_tot.values())
-                best_factor = max(i1_tot, key=i1_tot.get)
-                worst_factor = min(i1_tot, key=i1_tot.get)
+                if t2 == "League Average":
+                    st.markdown("#### Team vs League Baseline (Net Points)")
+                    t1_total_net = sum(i1_tot.values())
+                    best_factor = max(i1_tot, key=i1_tot.get)
+                    worst_factor = min(i1_tot, key=i1_tot.get)
 
-                m_col1, m_col2, m_col3 = st.columns(3)
-                with m_col1: st.metric(label=f"{t1} Net Impact", value=f"{t1_total_net:+.2f} pts")
-                with m_col2: st.metric(label="Strongest Area", value=best_factor, delta=f"{i1_tot[best_factor]:+.2f}")
-                with m_col3: st.metric(label="Biggest Liability", value=worst_factor, delta=f"{i1_tot[worst_factor]:+.2f}")
-                st.markdown("---")
+                    m_col1, m_col2, m_col3 = st.columns(3)
+                    with m_col1: st.metric(label=f"{t1} Net Impact", value=f"{t1_total_net:+.2f} pts")
+                    with m_col2: st.metric(label="Strongest Area", value=best_factor, delta=f"{i1_tot[best_factor]:+.2f}")
+                    with m_col3: st.metric(label="Biggest Liability", value=worst_factor, delta=f"{i1_tot[worst_factor]:+.2f}")
+                    st.markdown("---")
+                else:
+                    st.markdown("#### Season-Long Net Points Edge")
+                    t1_total_net = sum(i1_tot.values())
+                    t2_total_net = sum(i2_tot.values())
+                    diff = t1_total_net - t2_total_net
+                    winner = t1 if diff > 0 else t2
+                    
+                    # Calculate difference in each factor to find key driver
+                    diff_stats = {k: i1_tot[k] - i2_tot[k] for k in i1_tot}
+                    best_driver = max(diff_stats, key=lambda k: abs(diff_stats[k]))
+
+                    m_col1, m_col2, m_col3, m_col4 = st.columns(4)
+                    with m_col1: st.metric(label=f"{t1} Net Impact", value=f"{t1_total_net:+.2f} pts")
+                    with m_col2: st.metric(label=f"{t2} Net Impact", value=f"{t2_total_net:+.2f} pts")
+                    with m_col3: st.metric(label="Overall Advantage", value=f"{abs(diff):+.2f} pts", delta=winner)
+                    with m_col4: st.metric(label="Key Difference", value=best_driver)
+                    st.markdown("---")
         else:
             # Handle CLASSIC Analysis
-            if mode == "Head to Head Matchup" or mode == "Games Boxscores":
-                st.markdown("#### Situational Scoring Edge")
-                if mode == "Games Boxscores": s1_sum, s2_sum = g['t1_stats'], g['t2_stats']
-                else: s1_sum, s2_sum = t1_h2h_avg, t2_h2h_avg
+            def to_per_100(stats):
+                """Pace-adjusts situational stats to Per 100 Possessions"""
+                if not stats: return {}
+                
+                # Calculate estimated possessions
+                fga = stats.get('f2a', 0) + stats.get('f3a', 0)
+                poss = fga + 0.44 * stats.get('fta', 0) - stats.get('orb', 0) + stats.get('tov', 0)
+                
+                if poss <= 0: return stats # Safety fallback
+                
+                # Create a copy and apply the multiplier to the situational fields
+                multiplier = 100 / poss
+                adj = stats.copy()
+                adj['pts_off_to'] = stats.get('pts_off_to', 0) * multiplier
+                adj['pts_2nd_ch'] = stats.get('pts_2nd_ch', 0) * multiplier
+                adj['pts_fb'] = stats.get('pts_fb', 0) * multiplier
+                
+                return adj
+
+            # 1. Determine which base stats we are looking at based on the mode
+            if mode == "Games Boxscores": s1_plot, s2_plot = g['t1_stats'], g['t2_stats']
+            elif mode == "Head to Head Matchup": s1_plot, s2_plot = t1_h2h_avg, t2_h2h_avg
+            else: s1_plot, s2_plot = t1_off, t2_off
             
-                t1_sit_total = s1_sum.get('pts_off_to', 0) + s1_sum.get('pts_2nd_ch', 0) + s1_sum.get('pts_fb', 0)
-                t2_sit_total = s2_sum.get('pts_off_to', 0) + s2_sum.get('pts_2nd_ch', 0) + s2_sum.get('pts_fb', 0)
+            # 2. Create the pace-adjusted dictionaries 
+            s1_adj = to_per_100(s1_plot)
+            s2_adj = to_per_100(s2_plot)
+            lg_adj = to_per_100(lg_data)
+
+            # 3. Render the Metric Cards
+            if mode == "Head to Head Matchup" or mode == "Games Boxscores":
+                st.markdown("#### Situational Scoring Edge (Per 100 Possessions)")
+                
+                t1_sit_total = s1_adj.get('pts_off_to', 0) + s1_adj.get('pts_2nd_ch', 0) + s1_adj.get('pts_fb', 0)
+                t2_sit_total = s2_adj.get('pts_off_to', 0) + s2_adj.get('pts_2nd_ch', 0) + s2_adj.get('pts_fb', 0)
                 sit_diff = t1_sit_total - t2_sit_total
                 sit_winner = t1 if sit_diff > 0 else t2
 
                 m_col1, m_col2, m_col3 = st.columns(3)
-                with m_col1: st.metric(label=f"{t1} Sit. Pts", value=f"{t1_sit_total:.1f}")
-                with m_col2: st.metric(label=f"{t2} Sit. Pts", value=f"{t2_sit_total:.1f}")
+                with m_col1: st.metric(label=f"{t1} Sit. Pts/100", value=f"{t1_sit_total:.1f}")
+                with m_col2: st.metric(label=f"{t2} Sit. Pts/100", value=f"{t2_sit_total:.1f}")
                 with m_col3: st.metric(label="Sit. Advantage", value=f"{abs(sit_diff):+.1f} pts", delta=sit_winner)
                 st.markdown("---")
 
             elif mode == "Season Aggregates per Team":
-                st.markdown("#### Situational Profile vs League")
-                t1_sit_total = t1_off.get('pts_off_to', 0) + t1_off.get('pts_2nd_ch', 0) + t1_off.get('pts_fb', 0)
-                lg_sit_total = lg_data.get('pts_off_to', 0) + lg_data.get('pts_2nd_ch', 0) + lg_data.get('pts_fb', 0)
-                sit_diff = t1_sit_total - lg_sit_total
-                # Categorize into 4 tiers (You can adjust the 4.0 threshold if you prefer)
-                if sit_diff >= 4.0:
-                    tier_tag = "Elite"
-                elif sit_diff >= 0:
-                    tier_tag = "Above Avg"
-                elif sit_diff >= -4.0:
-                    tier_tag = "- Below Avg"   # The minus sign forces Streamlit to color it Red with a Down arrow
-                else:
-                    tier_tag = "- Bottom Tier" # The minus sign forces Streamlit to color it Red with a Down arrow
+                st.markdown("#### Situational Profile (Per 100 Possessions)")
+                
+                t1_sit_total = s1_adj.get('pts_off_to', 0) + s1_adj.get('pts_2nd_ch', 0) + s1_adj.get('pts_fb', 0)
+                
+                if t2 == "League Average":
+                    lg_sit_total = lg_adj.get('pts_off_to', 0) + lg_adj.get('pts_2nd_ch', 0) + lg_adj.get('pts_fb', 0)
+                    
+                    sit_diff = t1_sit_total - lg_sit_total
+                    if sit_diff >= 4.0: tier_tag = "Elite"
+                    elif sit_diff >= 0: tier_tag = "Above Avg"
+                    elif sit_diff >= -4.0: tier_tag = "- Below Avg"
+                    else: tier_tag = "- Bottom Tier"
 
-                m_col1, m_col2 = st.columns(2)
-                with m_col1: st.metric(label=f"{t1} Avg Sit. Pts", value=f"{t1_sit_total:.1f}")
-                with m_col2: st.metric(label="vs League Avg", value=f"{t1_sit_total - lg_sit_total:+.1f}", delta=tier_tag)
+                    m_col1, m_col2 = st.columns(2)
+                    with m_col1: st.metric(label=f"{t1} Total Sit. (Per 100)", value=f"{t1_sit_total:.1f}")
+                    with m_col2: st.metric(label="vs League Avg", value=f"{sit_diff:+.1f}", delta=tier_tag)
+                else:
+                    t2_sit_total = s2_adj.get('pts_off_to', 0) + s2_adj.get('pts_2nd_ch', 0) + s2_adj.get('pts_fb', 0)
+                    sit_diff = t1_sit_total - t2_sit_total
+                    sit_winner = t1 if sit_diff > 0 else t2
+                    
+                    m_col1, m_col2, m_col3 = st.columns(3)
+                    with m_col1: st.metric(label=f"{t1} Total Sit. (Per 100)", value=f"{t1_sit_total:.1f}")
+                    with m_col2: st.metric(label=f"{t2} Total Sit. (Per 100)", value=f"{t2_sit_total:.1f}")
+                    with m_col3: st.metric(label="Sit. Advantage", value=f"{abs(sit_diff):+.1f} pts", delta=sit_winner)
                 st.markdown("---")
 
         with st.container(border=True):
             if analysis_type == "4-Factors Net Points":
                 st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True, key=f"chart_4f_final_{t1}_{t2}")
             else:
-                if mode == "Games Boxscores": s1_plot, s2_plot = g['t1_stats'], g['t2_stats']
-                elif mode == "Head to Head Matchup": s1_plot, s2_plot = t1_h2h_avg, t2_h2h_avg
-                else: s1_plot, s2_plot = t1_off, t2_off
-                st.plotly_chart(plot_situational_comparison(s1_plot, s2_plot, t1, t2, lg_data), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
+                # --- THIS IS THE MISSING PART: Pass the Pace-Adjusted variables to Plotly ---
+                st.plotly_chart(plot_situational_comparison(s1_adj, s2_adj, t1, t2, lg_adj), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
                 st.markdown("### Four Factors (%) Comparison")
+                
+                # Use the raw (s1_plot, s2_plot) for the percentages so the math stays perfect
                 p1 = get_4f_percentages(s1_plot, s2_plot)
                 p2 = get_4f_percentages(s2_plot, s1_plot)
                 st.table(pd.DataFrame([p1, p2], index=[t1, t2]))
