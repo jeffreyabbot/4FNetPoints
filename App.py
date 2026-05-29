@@ -38,7 +38,58 @@ def clean_num(val):
     if pd.isna(val) or val == "" or val == "-": return 0.0
     try: return float(val)
     except: return 0.0
+def clean_player_name(text):
+    if not text or pd.isna(text):
+        return ""
+    text = str(text).strip()
+    # 1. Remove jersey patterns: #0, #00, 12., 05 -, etc. at the start
+    # This regex looks for start of string, optional #, then digits, then optional separator
+    text = re.sub(r'^(#?\d+[\s\.\-]*)+', '', text)
+    return text.strip()
 # --- HELPERS ---
+def highlight_scouting_outliers(val, col_name, actual_sort_col=None):
+    """Global scouting thresholds for Bold Red (Elite) and Bold Blue (Liability)."""
+    if actual_sort_col and col_name == actual_sort_col: 
+        return '' # Don't color text if the background is already colored
+    try:
+        v = float(val)
+        # Net Points Thresholds
+        if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
+            if v >= 1.75: return 'color: #e06666; font-weight: bold;'
+            if v <= -1.75: return 'color: #6fa8dc; font-weight: bold;'
+        
+        # USG% - Alpha Scorer vs Role Player
+        if col_name == 'USG%':
+            if v > 0.25: return 'color: #e06666; font-weight: bold;'
+            if v < 0.15: return 'color: #6fa8dc; font-weight: bold;'
+
+        # eFG% - Shooting Efficiency
+        if col_name == 'eFG%':
+            ref = globals().get('avg_efg', 0.52)
+            if v > ref + 0.08: return 'color: #e06666; font-weight: bold;'
+            if v < ref - 0.08: return 'color: #6fa8dc; font-weight: bold;'
+
+        # TO% - Ball Security
+        if col_name == 'TO%':
+            ref = globals().get('avg_to', 0.16)
+            if v < ref - 0.05: return 'color: #e06666; font-weight: bold;'
+            if v > ref + 0.05: return 'color: #6fa8dc; font-weight: bold;'
+
+        # OR% - Rebounding Skill
+        if col_name == 'OR%':
+            if v >= 0.10: return 'color: #e06666; font-weight: bold;'
+
+        # FTR - Foul Drawing
+        if col_name == 'FTR':
+            if v >= 0.40: return 'color: #e06666; font-weight: bold;'
+
+        # Situational Volumes (Per Game or Per 100)
+        if col_name in ['Pts_off_TO', '2nd_Chance', 'Fast_Break']:
+            if v >= 2.0: return 'color: #e06666; font-weight: bold;'
+            if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;'
+    except:
+        pass
+    return ''
 def inject_print_engine():
     st.markdown(
         """
@@ -563,33 +614,24 @@ def load_single_game_classic_individual(file_path, target_team):
         nk_t1 = make_match_key(t1_name)
         nk_t2 = make_match_key(t2_name)
 
+        # --- EXTRACT TEAM & OPPONENT CONTEXT ---
         if nk_target == nk_t1 or nk_target in nk_t1 or nk_t1 in nk_target:
             start_idx = 3
             end_idx = total_rows[0]
+            t_row, o_row = df.iloc[total_rows[0]], df.iloc[total_rows[1]]
         elif nk_target == nk_t2 or nk_target in nk_t2 or nk_t2 in nk_target:
             start_idx = total_rows[0] + 2
             end_idx = total_rows[1]
+            t_row, o_row = df.iloc[total_rows[1]], df.iloc[total_rows[0]]
         else:
             return None
 
         df_players = df.iloc[start_idx:end_idx].copy()
-        
-        # Ensure column 38 (AM) exists for Minutes
-        if 38 not in df_players.columns:
-            df_players[38] = "0:00"
+        if 38 not in df_players.columns: df_players[38] = "0:00"
 
-        # Map 38 to MIN_STR
-        df_players = df_players.rename(columns={
-            0: "Player", 1: "PTS", 2: "F2M", 3: "F2A", 4: "F3M", 5: "F3A",
-            6: "FTM", 7: "FTA", 9: "DRB", 10: "ORB", 14: "TOV",
-            19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break", 38: "MIN_STR"
-        })
-        
-        # Time Parser (e.g. "24:15" -> 24.25)
         def parse_min(val):
             if pd.isna(val): return 0.0
-            if hasattr(val, 'hour') and hasattr(val, 'minute') and hasattr(val, 'second'):
-                return val.hour * 60 + val.minute + val.second / 60.0
+            if hasattr(val, 'hour') and hasattr(val, 'minute'): return val.hour * 60 + val.minute + (getattr(val, 'second', 0) / 60.0)
             val_str = str(val).strip()
             if ':' in val_str:
                 parts = val_str.split(':')
@@ -598,9 +640,27 @@ def load_single_game_classic_individual(file_path, target_team):
             try: return float(val_str)
             except: return 0.0
 
+        # --- ASSIGN CONTEXT VARIABLES ---
+        df_players['Team_FGA'] = clean_num(t_row[3]) + clean_num(t_row[5])
+        df_players['Team_FTA'] = clean_num(t_row[7])
+        df_players['Team_TOV'] = clean_num(t_row[14])
+        df_players['Team_ORB'] = clean_num(t_row[10])
+        df_players['Opp_DRB'] = clean_num(o_row[9])
+        
+        t_mp = parse_min(t_row.get(38, "200:00"))
+        df_players['Team_MP'] = t_mp if t_mp > 0 else 200.0
+
+        # --- RENAME AND CLEAN ---
+        df_players = df_players.rename(columns={
+            0: "Player", 1: "PTS", 2: "F2M", 3: "F2A", 4: "F3M", 5: "F3A",
+            6: "FTM", 7: "FTA", 9: "DRB", 10: "ORB", 14: "TOV",
+            19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break", 38: "MIN_STR"
+        })
+        # CRITICAL: Strip Jersey numbers at the source
+        df_players['Player'] = df_players['Player'].apply(clean_player_name)
         df_players['MIN'] = df_players['MIN_STR'].apply(parse_min)
 
-        cols_to_keep = ["Player", "PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "MIN"]
+        cols_to_keep = ["Player", "PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]
         valid_cols = [c for c in cols_to_keep if c in df_players.columns]
         df_players = df_players[valid_cols]
 
@@ -622,12 +682,15 @@ def load_single_game_classic_individual(file_path, target_team):
         df_players['FGA'] = df_players['F2A'] + df_players['F3A']
         df_players['FGM'] = df_players['F2M'] + df_players['F3M']
 
+        # --- SINGLE GAME MATH ---
         df_players['eFG%'] = df_players.apply(lambda x: (x['FGM'] + 0.5 * x['F3M']) / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
         df_players['TO%'] = df_players.apply(lambda x: x['TOV'] / (x['FGA'] + 0.44 * x['FTA'] + x['TOV']) if (x['FGA'] + 0.44 * x['FTA'] + x['TOV']) > 0 else 0, axis=1)
         df_players['FTR'] = df_players.apply(lambda x: x['FTM'] / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
+    
         
-        # Calculate true OR/40
-        df_players['OR/40'] = df_players.apply(lambda x: (x['ORB'] / x['MIN']) * 40 if x['MIN'] > 0 else 0, axis=1)
+        # --- NEW SINGLE GAME SYNERGY MATH ---
+        df_players['USG%'] = df_players.apply(lambda x: ((x['FGA'] + 0.44 * x['FTA'] + x['TOV']) * (x['Team_MP'] / 5)) / (x['MIN'] * (x['Team_FGA'] + 0.44 * x['Team_FTA'] + x['Team_TOV'])) if (x['MIN'] > 0 and (x['Team_FGA'] + 0.44 * x['Team_FTA'] + x['Team_TOV']) > 0) else 0, axis=1)
+        df_players['OR%'] = df_players.apply(lambda x: (x['ORB'] * (x['Team_MP'] / 5)) / (x['MIN'] * (x['Team_ORB'] + x['Opp_DRB'])) if (x['MIN'] > 0 and (x['Team_ORB'] + x['Opp_DRB']) > 0) else 0, axis=1)
 
         return df_players
     except Exception as e:
@@ -639,7 +702,6 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
         return {w for w in s.split() if len(w) > 2 and w not in ignore}
 
     target_words = get_sig_words(target_team)
-    
     mask_ls = (df_index['league'] == league) & (df_index['season'] == season)
     if phase and phase != "Overall Season":
         mask_ls = mask_ls & (df_index['phase'] == phase)
@@ -657,8 +719,8 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
         return True
 
     matchup_games = df_ls[df_ls.apply(is_matchup, axis=1)]
-
     all_game_stats = []
+    
     for _, row in matchup_games.iterrows():
         df_game = load_single_game_classic_individual(row['path'], target_team)
         if df_game is not None and not df_game.empty:
@@ -667,21 +729,28 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
     if not all_game_stats: return None
     combined = pd.concat(all_game_stats, ignore_index=True)
     
-    # We sum MIN as well to calculate the exact average later
-    cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN"]
+    # We sum the context variables exactly like the player stats!
+    cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]
     cols_to_sum = [c for c in cols_to_sum if c in combined.columns]
     
     h2h_totals = combined.groupby('Player')[cols_to_sum].sum().reset_index()
 
+    # Average counting stats (Skip context variables as we don't need their per-game average)
     n_games = len(matchup_games)
     for col in h2h_totals.columns:
-        if col not in ['Player', 'Team_Name', 'GP']:
+        if col not in ['Player', 'Team_Name', 'GP'] and col not in ["Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]:
             h2h_totals[col] = h2h_totals[col] / n_games
 
+    # --- LATE DIVISION MATH ---
     h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
     h2h_totals['TO%'] = h2h_totals.apply(lambda x: x.get('TOV',0) / (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) if (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) > 0 else 0, axis=1)
     h2h_totals['FTR'] = h2h_totals.apply(lambda x: x.get('FTM',0) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
     h2h_totals['OR/40'] = h2h_totals.apply(lambda x: (x.get('ORB',0) / x['MIN']) * 40 if x.get('MIN', 0) > 0 else 0, axis=1)
+    
+    # --- LATE DIVISION SYNERGY MATH ---
+    h2h_totals['USG%'] = h2h_totals.apply(lambda x: ((x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_FGA',1) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0))) if (x.get('MIN',0) > 0 and (x.get('Team_FGA',0) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0)) > 0) else 0, axis=1)
+    h2h_totals['OR%'] = h2h_totals.apply(lambda x: (x.get('ORB',0) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_ORB',1) + x.get('Opp_DRB',0))) if (x.get('MIN',0) > 0 and (x.get('Team_ORB',0) + x.get('Opp_DRB',0)) > 0) else 0, axis=1)
+    
     h2h_totals['Team_Name'] = target_team
 
     return h2h_totals
@@ -779,7 +848,8 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     def get_col(name): return col_map.get(name.upper())
     p_col = get_col('Player')
 
-    rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'eFG%', 'TO%', 'OR/40', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
+    # ---> ADDED USG% AND OR% HERE <---
+    rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     available_sorts = [s for s in rankable_metrics if get_col(s) is not None]
 
     # 2. SELECT SORTING
@@ -806,7 +876,8 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     if get_col('GP'): cols_to_show.append(get_col('GP'))
     if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
 
-    classic_cols = ['PTS', 'eFG%', 'TO%', 'OR/40', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
+    # ---> ADDED USG% AND OR% HERE <---
+    classic_cols = ['PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     for c in classic_cols:
         actual_c = get_col(c)
         if actual_c and actual_c not in cols_to_show:
@@ -847,7 +918,6 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     styler = styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
 
     # 7. OUTLIER TEXT HIGHLIGHTING (The "Scout's Eye")
-    # We pull the benchmarks from the global scope, with safe fallbacks
     def highlight_outliers(val, col_name):
         if col_name == actual_sort_col: return '' # Don't color text if background is colored
         try:
@@ -857,7 +927,10 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
                 if v >= 1.00: return 'color: #e06666; font-weight: bold;'
                 if v <= -1.00: return 'color: #6fa8dc; font-weight: bold;'
             
-            # Thresholds for Classic Stats (using global averages if they exist)
+            # ---> ADDED THRESHOLDS FOR USG% AND OR% <---
+            if col_name == 'USG%':
+                if v > 0.25: return 'color: #e06666; font-weight: bold;' # Elite Usage (Alpha Scorer)
+                if v < 0.15: return 'color: #6fa8dc; font-weight: bold;' # Low Usage (Role Player)
             if col_name == 'eFG%':
                 ref = globals().get('avg_efg', 0.52)
                 if v > ref + 0.08: return 'color: #e06666; font-weight: bold;'
@@ -866,29 +939,48 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
                 ref = globals().get('avg_to', 0.16)
                 if v < ref - 0.05: return 'color: #e06666; font-weight: bold;'
                 if v > ref + 0.05: return 'color: #6fa8dc; font-weight: bold;'
-            if col_name == 'OR/40':
-                if v > 4.5: return 'color: #e06666; font-weight: bold;'
+            if col_name == 'OR%':
+                if v >= 0.10: return 'color: #e06666; font-weight: bold;' # Elite Rebounder (10%+)
+            if col_name == 'FTR':
+                if v >= 0.40: return 'color: #e06666; font-weight: bold;' # Elite Free Throw Rate (40%+)
+            if col_name == 'Pts_off_TO':
+                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite Points Off TO (2+ per 100)
+                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor Points Off TO (0.5 or less per 100)
+            if col_name == '2nd_Chance':
+                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite 2nd Chance Points (1.5+ per 100)
+                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor 2nd Chance Points (0.5 or less per 100) 
+            if col_name == 'Fast_Break':
+                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite Fast Break Points (1+ per 100)
+                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor Fast Break Points (0.3 or less per 100)
         except: pass
         return ''
 
     for col in numeric_cols:
         styler = styler.map(lambda x, c=col: highlight_outliers(x, c), subset=[col])
 
-    # 8. BACKGROUND GRADIENTS (The "Thermal Focus")
+    # 8. BACKGROUND GRADIENTS (Javascript Crash-Proof)
     for col in numeric_cols:
         if col == actual_sort_col:
+            
+            # Find the actual bounds
+            c_min = df_final[col].min()
+            c_max = df_final[col].max()
+            
+            # NUCLEAR FIX: Force a mathematical gap so Streamlit's frontend never divides by zero
+            if pd.isna(c_min) or pd.isna(c_max) or c_min >= c_max:
+                c_min = -0.01
+                c_max = 0.01
+
             if col.upper() in [c.upper() for c in classic_cols]:
                 if col.upper() == 'TO%':
-                    styler = styler.background_gradient(cmap=custom_redblue, subset=[col])
-                elif col.upper() in ['PTS', 'OR/40', 'PTS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK', 'F2M', 'F2A', 'F3M', 'F3A']:
-                    styler = styler.background_gradient(cmap=custom_wred, subset=[col])
+                    styler = styler.background_gradient(cmap=custom_redblue, subset=[col], vmin=c_min, vmax=c_max)
+                elif col.upper() in ['PTS', 'USG%', 'PTS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK', 'F2M', 'F2A', 'F3M', 'F3A']:
+                    styler = styler.background_gradient(cmap=custom_wred, subset=[col], vmin=0, vmax=max(c_max, 1.0))
                 else:
-                    styler = styler.background_gradient(cmap=custom_bluered, subset=[col])
+                    styler = styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=c_min, vmax=c_max)
             else:
-                v_max = df_final[col].abs().max()
-                v_max = max(v_max, 1.0)
+                v_max = max(df_final[col].abs().max(), 1.0)
                 styler = styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=-v_max, vmax=v_max)
-
     # 9. RENDER
     dynamic_height = (len(df_final) * 36) + 45
     col_config = {"Pos": st.column_config.NumberColumn("Pos", width="small"), p_col: st.column_config.TextColumn("Player", width="medium")}
@@ -1763,24 +1855,28 @@ elif mode == "Team Performance by Game":
                             format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
                             format_dict["FTR"] = "{:.3f}"
 
-                    styler = perf_df.style.format(format_dict).map(lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), subset=['Outcome'])
-                    
-                    if analysis_type == "4-Factors Net Points":
-                        styler = perf_df.style.format(format_dict).map(
+                    # --- FIX FOR TEAM PERFORMANCE VIEW GRADIENTS ---
+                    styler = perf_df.style.format(format_dict).map(
                         lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), 
                         subset=['Outcome']
                     )
                     
                     if analysis_type == "4-Factors Net Points":
-                        # DYNAMIC FOCUS: Only highlight the 'Total 4F' column as the primary result
-                        # The individual factors (Shooting, etc.) remain clean for easier reading.
-                        styler = styler.background_gradient(subset=['Total 4F'], cmap=custom_bluered, vmin=-15, vmax=15)
+                        # SAFETY CHECK: Only apply gradient if there's a range of values
+                        if perf_df['Total 4F'].min() != perf_df['Total 4F'].max():
+                            styler = styler.background_gradient(subset=['Total 4F'], cmap=custom_bluered, vmin=-15, vmax=15)
                     else:
-                        # DYNAMIC FOCUS: Highlight the key situational scoring outcomes
+                        # SAFETY CHECK FOR CLASSIC STATS
                         if view_type == "Net Impact":
-                            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_bluered, vmin=-15, vmax=15)
+                            cols_to_grade = ['Pts off TO', '2nd Chance', 'Fast Break']
+                            for col in cols_to_grade:
+                                if perf_df[col].min() != perf_df[col].max():
+                                    styler = styler.background_gradient(subset=[col], cmap=custom_bluered, vmin=-15, vmax=15)
                         else:
-                            styler = styler.background_gradient(subset=['Pts off TO', '2nd Chance', 'Fast Break'], cmap=custom_wred, vmin=0, vmax=30)
+                            cols_to_grade = ['Pts off TO', '2nd Chance', 'Fast Break']
+                            for col in cols_to_grade:
+                                if perf_df[col].min() != perf_df[col].max():
+                                    styler = styler.background_gradient(subset=[col], cmap=custom_wred, vmin=0, vmax=30)
 
                     dynamic_height_team = (len(perf_df) * 36) + 45
                     col_config_team = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
@@ -1821,9 +1917,9 @@ elif mode == "Team Performance by Game":
 
                         def is_player_match(n_in_game, n_target):
                             if not n_in_game or not n_target: return False
-                            # Normalize both: strip numbers, remove dots/spaces, remove accents
+                            # Clean both names to ensure jersey-less matching
                             def sn(t):
-                                clean = clean_p_name(t)
+                                clean = clean_player_name(t)
                                 return re.sub(r'[\s\.]+', '', normalize_str(clean))
                             return sn(n_in_game) == sn(n_target)
 
@@ -1859,7 +1955,7 @@ elif mode == "Team Performance by Game":
                                     for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
                                         if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
                             else:
-                                p_numeric = ["PTS", "eFG%", "TO%", "OR/40", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
+                                p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
                                 exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
                                 if exp_shoot:
                                     for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
@@ -1882,14 +1978,23 @@ elif mode == "Team Performance by Game":
                             p_format = {k: get_col_format(k) for k in p_numeric}
                             styler_p = player_df[p_cols].style.format(p_format)
                             
-                            # --- APPLY GRADIENT ONLY TO THE HIGHLIGHTED TREND ---
+                            # --- APPLY STYLING (Outliers + Thermal Focus) ---
                             for col in [c for c in p_numeric if c in player_df.columns]:
+                                # 1. Apply the "Scout's Eye" Bold Text Highlighting
+                                styler_p = styler_p.map(
+                                    lambda x, c=col: highlight_scouting_outliers(x, c, p_focus), 
+                                    subset=[col]
+                                )
+
+                                # 2. Apply the Thermal Background to the focused column
                                 if col == p_focus:
-                                    if 'TO%' in col: cmap = custom_redblue
-                                    elif any(x in col for x in ['PTS', 'OR/40', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
-                                        cmap = custom_wred
-                                    else: cmap = custom_bluered
-                                    styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
+                                    if player_df[col].min() != player_df[col].max():
+                                        if 'TO%' in col: cmap = custom_redblue
+                                        elif any(x in col for x in ['PTS', 'USG%', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
+                                            cmap = custom_wred
+                                        else: cmap = custom_bluered
+                                        
+                                        styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
 
                             dynamic_height_p = (len(player_df) * 36) + 45
                             col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
@@ -2337,13 +2442,68 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
             else:
                 # --- THIS IS THE MISSING PART: Pass the Pace-Adjusted variables to Plotly ---
                 st.plotly_chart(plot_situational_comparison(s1_adj, s2_adj, t1, t2, lg_adj), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
-                st.markdown("### Four Factors (%) Comparison")
+                st.markdown("### 4-Factors Matchup Identity")
                 
-                # Use the raw (s1_plot, s2_plot) for the percentages so the math stays perfect
+                # 1. Get raw data
                 p1 = get_4f_percentages(s1_plot, s2_plot)
                 p2 = get_4f_percentages(s2_plot, s1_plot)
-                st.table(pd.DataFrame([p1, p2], index=[t1, t2]))
+                
+                # 2. Create a Transposed DataFrame (Factors as rows)
+                df_4f = pd.DataFrame([p1, p2], index=[t1, t2]).T
+                
+                # 3. Add the "Gap" column
+                df_4f['Gap'] = df_4f[t1] - df_4f[t2]
+                
+                # 4. Styling logic
+                def style_gap(val, factor_name):
+                    # Thermal logic: Good is Red, Bad is Blue
+                    if factor_name == "TO%":
+                        # For Turnovers, a positive gap (more TOs) is BAD (Blue)
+                        color = "#6fa8dc" if val > 0 else "#e06666"
+                    else:
+                        # For everything else, positive is GOOD (Red)
+                        color = "#e06666" if val > 0 else "#6fa8dc"
+                    
+                    # Only apply color if the gap is significant
+                    return f'color: {color}; font-weight: bold;' if abs(val) > 0.001 else ''
 
+                # 5. Initialize Styler
+                styler_4f = df_4f.style.format({
+                    t1: "{:.1%}" if "FTR" not in t1 else "{:.3f}",
+                    t2: "{:.1%}" if "FTR" not in t2 else "{:.3f}",
+                    'Gap': "{:+.1%}"
+                })
+                
+                # Standardize FTR row formatting specifically
+                styler_4f = styler_4f.format(subset=pd.IndexSlice[['FTR'], ['Gap']], formatter="{:+.3f}")
+                styler_4f = styler_4f.format(subset=pd.IndexSlice[['FTR'], [t1, t2]], formatter="{:.3f}")
+
+                # Apply the text-based thermal logic to the Gap column
+                styler_4f = styler_4f.apply(lambda x: [style_gap(v, x.name) for v in x], axis=1, subset=['Gap'])
+                
+                # Add a very subtle background to the Gap column only
+                styler_4f = styler_4f.background_gradient(
+                    cmap=custom_bluered, subset=pd.IndexSlice[['eFG%', 'ORB%', 'FTR'], ['Gap']], vmin=-0.05, vmax=0.05
+                )
+                styler_4f = styler_4f.background_gradient(
+                    cmap=custom_redblue, subset=pd.IndexSlice[['TO%'], ['Gap']], vmin=-0.05, vmax=0.05
+                )
+
+                # 6. Render as a compact "Card"
+                # We use columns to center it and keep it narrow
+                c_left, c_mid, c_right = st.columns([1, 2, 1])
+                with c_mid:
+                    st.dataframe(
+                        styler_4f, 
+                        use_container_width=True, 
+                        height=175, # Keeps it very compact
+                        column_config={
+                            "index": st.column_config.TextColumn("Factor", width="small"),
+                            t1: st.column_config.NumberColumn(width="small"),
+                            t2: st.column_config.NumberColumn(width="small"),
+                            "Gap": st.column_config.NumberColumn("Advantage", width="small")
+                        }
+                    )
     with tab_players:
         if analysis_type == "4-Factors Net Points":
             col_ctrl1, col_ctrl2 = st.columns(2)
