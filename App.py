@@ -751,17 +751,15 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
     if not all_game_stats: return None
     combined = pd.concat(all_game_stats, ignore_index=True)
     
-    # We sum the context variables exactly like the player stats!
     cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]
     cols_to_sum = [c for c in cols_to_sum if c in combined.columns]
     
     h2h_totals = combined.groupby('Player')[cols_to_sum].sum().reset_index()
 
-    # Average counting stats (Skip context variables as we don't need their per-game average)
-    n_games = len(matchup_games)
+    # --- THE FIX: Divide by the PLAYER'S Games Played, not the Team's Total Games ---
     for col in h2h_totals.columns:
         if col not in ['Player', 'Team_Name', 'GP'] and col not in ["Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]:
-            h2h_totals[col] = h2h_totals[col] / n_games
+            h2h_totals[col] = h2h_totals[col] / h2h_totals['GP'].replace(0, 1)
 
     # --- LATE DIVISION MATH ---
     h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
