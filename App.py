@@ -47,46 +47,68 @@ def clean_player_name(text):
     text = re.sub(r'^(#?\d+[\s\.\-]*)+', '', text)
     return text.strip()
 # --- HELPERS ---
-def highlight_scouting_outliers(val, col_name, actual_sort_col=None):
-    """Global scouting thresholds for Bold Red (Elite) and Bold Blue (Liability)."""
+def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sample=False):
+    """Global scouting thresholds for Bold Red (Elite) and Bold Blue (Liability).
+    Adapts thresholds depending on whether it's a large sample (season) or small sample (single game/H2H)."""
     if actual_sort_col and col_name == actual_sort_col: 
         return '' # Don't color text if the background is already colored
     try:
         v = float(val)
-        # Net Points Thresholds
-        if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
-            if v >= 1.75: return 'color: #e06666; font-weight: bold;'
-            if v <= -1.75: return 'color: #6fa8dc; font-weight: bold;'
         
-        # USG% - Alpha Scorer vs Role Player
-        if col_name == 'USG%':
-            if v > 0.25: return 'color: #e06666; font-weight: bold;'
-            if v < 0.15: return 'color: #6fa8dc; font-weight: bold;'
+        # --- DEFINE THRESHOLDS BASED ON SAMPLE SIZE ---
+        if is_large_sample:
+            # Tighter thresholds for season averages
+            np_elite, np_poor = 1.50, -1.00
+            usg_elite, usg_poor = 0.25, 0.15
+            efg_margin = 0.08
+            to_margin = 0.05
+            or_elite = 0.10
+            ftr_elite = 0.40
+            sit_elite, sit_poor = 1.5, 0.5
+        else:
+            # Looser thresholds for high-variance single games / H2H
+            np_elite, np_poor = 3.00, -2.00
+            usg_elite, usg_poor = 0.30, 0.12
+            efg_margin = 0.15
+            to_margin = 0.08
+            or_elite = 0.15
+            ftr_elite = 0.50
+            sit_elite, sit_poor = 3.0, 0.5
 
-        # eFG% - Shooting Efficiency
+        # 1. Net Points Thresholds
+        if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
+            if v >= np_elite: return 'color: #e06666; font-weight: bold;'
+            if v <= np_poor: return 'color: #6fa8dc; font-weight: bold;'
+        
+        # 2. USG% - Alpha Scorer vs Role Player
+        if col_name == 'USG%':
+            if v >= usg_elite: return 'color: #e06666; font-weight: bold;'
+            if v <= usg_poor: return 'color: #6fa8dc; font-weight: bold;'
+
+        # 3. eFG% - Shooting Efficiency
         if col_name == 'eFG%':
             ref = globals().get('avg_efg', 0.52)
-            if v > ref + 0.08: return 'color: #e06666; font-weight: bold;'
-            if v < ref - 0.08: return 'color: #6fa8dc; font-weight: bold;'
+            if v >= ref + efg_margin: return 'color: #e06666; font-weight: bold;'
+            if v <= ref - efg_margin: return 'color: #6fa8dc; font-weight: bold;'
 
-        # TO% - Ball Security
+        # 4. TO% - Ball Security (Lower is better)
         if col_name == 'TO%':
             ref = globals().get('avg_to', 0.16)
-            if v < ref - 0.05: return 'color: #e06666; font-weight: bold;'
-            if v > ref + 0.05: return 'color: #6fa8dc; font-weight: bold;'
+            if v <= ref - to_margin: return 'color: #e06666; font-weight: bold;'
+            if v >= ref + to_margin: return 'color: #6fa8dc; font-weight: bold;'
 
-        # OR% - Rebounding Skill
+        # 5. OR% - Rebounding Skill
         if col_name == 'OR%':
-            if v >= 0.10: return 'color: #e06666; font-weight: bold;'
+            if v >= or_elite: return 'color: #e06666; font-weight: bold;'
 
-        # FTR - Foul Drawing
+        # 6. FTR - Foul Drawing
         if col_name == 'FTR':
-            if v >= 0.40: return 'color: #e06666; font-weight: bold;'
+            if v >= ftr_elite: return 'color: #e06666; font-weight: bold;'
 
-        # Situational Volumes (Per Game or Per 100)
+        # 7. Situational Volumes (Per Game or Per 100)
         if col_name in ['Pts_off_TO', '2nd_Chance', 'Fast_Break']:
-            if v >= 2.0: return 'color: #e06666; font-weight: bold;'
-            if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;'
+            if v >= sit_elite: return 'color: #e06666; font-weight: bold;'
+            if v <= sit_poor: return 'color: #6fa8dc; font-weight: bold;'
     except:
         pass
     return ''
@@ -838,7 +860,7 @@ def load_individual_aggregate_classic(team_name, league, season, phase=None):
         df['TO%'] = df.apply(lambda x: x[tov] / (x['FGA'] + 0.44 * x[fta] + x[tov]) if (x['FGA'] + 0.44 * x[fta] + x[tov]) > 0 else 0, axis=1)
         df['FTR'] = df.apply(lambda x: x[ftm] / x['FGA'] if x['FGA'] > 0 else 0, axis=1)
     return df
-def display_player_table(df, title, show_off_def=False, show_shooting=False):
+def display_player_table(df, title, show_off_def=False, show_shooting=False, is_large_sample=False):
     if df is None or df.empty:
         st.warning(f"No player data found for {title}")
         return
@@ -848,7 +870,6 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     def get_col(name): return col_map.get(name.upper())
     p_col = get_col('Player')
 
-    # ---> ADDED USG% AND OR% HERE <---
     rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     available_sorts = [s for s in rankable_metrics if get_col(s) is not None]
 
@@ -876,7 +897,6 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     if get_col('GP'): cols_to_show.append(get_col('GP'))
     if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
 
-    # ---> ADDED USG% AND OR% HERE <---
     classic_cols = ['PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     for c in classic_cols:
         actual_c = get_col(c)
@@ -917,56 +937,16 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
     styler = styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
     styler = styler.apply(lambda row: ['background-color: rgba(255,255,255,0.08);'] * len(row) if 'TEAM' in str(row[p_col]).upper() else [''] * len(row), axis=1)
 
-    # 7. OUTLIER TEXT HIGHLIGHTING (The "Scout's Eye")
-    def highlight_outliers(val, col_name):
-        if col_name == actual_sort_col: return '' # Don't color text if background is colored
-        try:
-            v = float(val)
-            # Thresholds for Net Points
-            if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
-                if v >= 1.00: return 'color: #e06666; font-weight: bold;'
-                if v <= -1.00: return 'color: #6fa8dc; font-weight: bold;'
-            
-            # ---> ADDED THRESHOLDS FOR USG% AND OR% <---
-            if col_name == 'USG%':
-                if v > 0.25: return 'color: #e06666; font-weight: bold;' # Elite Usage (Alpha Scorer)
-                if v < 0.15: return 'color: #6fa8dc; font-weight: bold;' # Low Usage (Role Player)
-            if col_name == 'eFG%':
-                ref = globals().get('avg_efg', 0.52)
-                if v > ref + 0.08: return 'color: #e06666; font-weight: bold;'
-                if v < ref - 0.08: return 'color: #6fa8dc; font-weight: bold;'
-            if col_name == 'TO%':
-                ref = globals().get('avg_to', 0.16)
-                if v < ref - 0.05: return 'color: #e06666; font-weight: bold;'
-                if v > ref + 0.05: return 'color: #6fa8dc; font-weight: bold;'
-            if col_name == 'OR%':
-                if v >= 0.10: return 'color: #e06666; font-weight: bold;' # Elite Rebounder (10%+)
-            if col_name == 'FTR':
-                if v >= 0.40: return 'color: #e06666; font-weight: bold;' # Elite Free Throw Rate (40%+)
-            if col_name == 'Pts_off_TO':
-                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite Points Off TO (2+ per 100)
-                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor Points Off TO (0.5 or less per 100)
-            if col_name == '2nd_Chance':
-                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite 2nd Chance Points (1.5+ per 100)
-                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor 2nd Chance Points (0.5 or less per 100) 
-            if col_name == 'Fast_Break':
-                if v >= 2.0: return 'color: #e06666; font-weight: bold;' # Elite Fast Break Points (1+ per 100)
-                if v <= 1.0: return 'color: #6fa8dc; font-weight: bold;' # Poor Fast Break Points (0.3 or less per 100)
-        except: pass
-        return ''
-
+    # 7. OUTLIER TEXT HIGHLIGHTING (The "Scout's Eye" - uses the new adaptive logic)
     for col in numeric_cols:
-        styler = styler.map(lambda x, c=col: highlight_outliers(x, c), subset=[col])
+        styler = styler.map(lambda x, c=col: highlight_scouting_outliers(x, c, actual_sort_col, is_large_sample), subset=[col])
 
     # 8. BACKGROUND GRADIENTS (Javascript Crash-Proof)
     for col in numeric_cols:
         if col == actual_sort_col:
-            
-            # Find the actual bounds
             c_min = df_final[col].min()
             c_max = df_final[col].max()
             
-            # NUCLEAR FIX: Force a mathematical gap so Streamlit's frontend never divides by zero
             if pd.isna(c_min) or pd.isna(c_max) or c_min >= c_max:
                 c_min = -0.01
                 c_max = 0.01
@@ -981,6 +961,7 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False):
             else:
                 v_max = max(df_final[col].abs().max(), 1.0)
                 styler = styler.background_gradient(cmap=custom_bluered, subset=[col], vmin=-v_max, vmax=v_max)
+                
     # 9. RENDER
     dynamic_height = (len(df_final) * 36) + 45
     col_config = {"Pos": st.column_config.NumberColumn("Pos", width="small"), p_col: st.column_config.TextColumn("Player", width="medium")}
@@ -1980,9 +1961,9 @@ elif mode == "Team Performance by Game":
                             
                             # --- APPLY STYLING (Outliers + Thermal Focus) ---
                             for col in [c for c in p_numeric if c in player_df.columns]:
-                                # 1. Apply the "Scout's Eye" Bold Text Highlighting
+                                # 1. Apply the "Scout's Eye" Bold Text Highlighting (Force single-game logic)
                                 styler_p = styler_p.map(
-                                    lambda x, c=col: highlight_scouting_outliers(x, c, p_focus), 
+                                    lambda x, c=col: highlight_scouting_outliers(x, c, p_focus, is_large_sample=False), 
                                     subset=[col]
                                 )
 
@@ -2240,7 +2221,7 @@ elif mode == "Overall League Standings":
                 st.markdown(f"### {title_prefix} Impact ({selected_phase})")
                 
                 # USING YOUR ORIGINAL RENDERER (It handles the Classic columns perfectly!)
-                display_player_table(df_leaderboard.head(50), "League Leaderboard", exp_ld_offdef, exp_ld_shoot)
+                display_player_table(df_leaderboard.head(50), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
     df_f = df_league[df_league['season'] == season].copy()
@@ -2438,73 +2419,101 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 
         with st.container(border=True):
             if analysis_type == "4-Factors Net Points":
+                # --- RENDER NET POINTS BAR CHART ---
                 st.plotly_chart(plot_4f_comparison(i1_tot, i2_tot, t1, t2), use_container_width=True, key=f"chart_4f_final_{t1}_{t2}")
             else:
-                # --- THIS IS THE MISSING PART: Pass the Pace-Adjusted variables to Plotly ---
+                # --- RENDER SITUATIONAL BAR CHART ---
                 st.plotly_chart(plot_situational_comparison(s1_adj, s2_adj, t1, t2, lg_adj), use_container_width=True, key=f"chart_sit_final_{t1}_{t2}")
-                st.markdown("### 4-Factors Matchup Identity")
                 
-                # 1. Get raw data
-                p1 = get_4f_percentages(s1_plot, s2_plot)
-                p2 = get_4f_percentages(s2_plot, s1_plot)
-                
-                # 2. Create a Transposed DataFrame (Factors as rows)
-                df_4f = pd.DataFrame([p1, p2], index=[t1, t2]).T
-                
-                # 3. Add the "Gap" column
-                df_4f['Gap'] = df_4f[t1] - df_4f[t2]
-                
-                # 4. Styling logic
+                # --- RENDER 4-FACTORS IDENTITY TABLES ---
+                # Helper function to dynamically color the Gap text based on the metric
                 def style_gap(val, factor_name):
-                    # Thermal logic: Good is Red, Bad is Blue
-                    if factor_name == "TO%":
-                        # For Turnovers, a positive gap (more TOs) is BAD (Blue)
+                    # For these factors, a POSITIVE gap is BAD (so we color it Blue)
+                    # Offense TO% (we want less), and Defense eFG%, ORB%, FTR (we want opponent to have less)
+                    negative_is_good = ["TO%", "Opp eFG%", "Opp ORB%", "Opp FTR"]
+                    
+                    if factor_name in negative_is_good:
                         color = "#6fa8dc" if val > 0 else "#e06666"
                     else:
-                        # For everything else, positive is GOOD (Red)
                         color = "#e06666" if val > 0 else "#6fa8dc"
-                    
-                    # Only apply color if the gap is significant
+                        
                     return f'color: {color}; font-weight: bold;' if abs(val) > 0.001 else ''
 
-                # 5. Initialize Styler
-                styler_4f = df_4f.style.format({
-                    t1: "{:.1%}" if "FTR" not in t1 else "{:.3f}",
-                    t2: "{:.1%}" if "FTR" not in t2 else "{:.3f}",
-                    'Gap': "{:+.1%}"
-                })
-                
-                # Standardize FTR row formatting specifically
-                styler_4f = styler_4f.format(subset=pd.IndexSlice[['FTR'], ['Gap']], formatter="{:+.3f}")
-                styler_4f = styler_4f.format(subset=pd.IndexSlice[['FTR'], [t1, t2]], formatter="{:.3f}")
+                # Helper to build the 4F dataframes identically
+                def build_4f_styler(df, is_defense=False):
+                    styler = df.style.format({t1: "{:.1%}", t2: "{:.1%}", 'Gap': "{:+.1%}"})
+                    
+                    ftr_idx = 'Opp FTR' if is_defense else 'FTR'
+                    styler = styler.format(subset=pd.IndexSlice[[ftr_idx], ['Gap']], formatter="{:+.3f}")
+                    styler = styler.format(subset=pd.IndexSlice[[ftr_idx], [t1, t2]], formatter="{:.3f}")
 
-                # Apply the text-based thermal logic to the Gap column
-                styler_4f = styler_4f.apply(lambda x: [style_gap(v, x.name) for v in x], axis=1, subset=['Gap'])
-                
-                # Add a very subtle background to the Gap column only
-                styler_4f = styler_4f.background_gradient(
-                    cmap=custom_bluered, subset=pd.IndexSlice[['eFG%', 'ORB%', 'FTR'], ['Gap']], vmin=-0.05, vmax=0.05
-                )
-                styler_4f = styler_4f.background_gradient(
-                    cmap=custom_redblue, subset=pd.IndexSlice[['TO%'], ['Gap']], vmin=-0.05, vmax=0.05
-                )
+                    # Apply text coloring
+                    styler = styler.apply(lambda x: [style_gap(v, x.name) for v in x], axis=1, subset=['Gap'])
+                    
+                    # Apply background gradients
+                    if not is_defense:
+                        styler = styler.background_gradient(cmap=custom_bluered, subset=pd.IndexSlice[['eFG%', 'ORB%', 'FTR'], ['Gap']], vmin=-0.05, vmax=0.05)
+                        styler = styler.background_gradient(cmap=custom_redblue, subset=pd.IndexSlice[['TO%'], ['Gap']], vmin=-0.05, vmax=0.05)
+                    else:
+                        # On defense, higher eFG%, ORB%, FTR allowed is BAD (custom_redblue makes positive gaps Blue)
+                        styler = styler.background_gradient(cmap=custom_redblue, subset=pd.IndexSlice[['Opp eFG%', 'Opp ORB%', 'Opp FTR'], ['Gap']], vmin=-0.05, vmax=0.05)
+                        # On defense, higher TO% forced is GOOD (custom_bluered makes positive gaps Red)
+                        styler = styler.background_gradient(cmap=custom_bluered, subset=pd.IndexSlice[['Opp TO%'], ['Gap']], vmin=-0.05, vmax=0.05)
+                    
+                    return styler
 
-                # 6. Render as a compact "Card"
-                # We use columns to center it and keep it narrow
-                c_left, c_mid, c_right = st.columns([1, 2, 1])
-                with c_mid:
-                    st.dataframe(
-                        styler_4f, 
-                        use_container_width=True, 
-                        height=175, # Keeps it very compact
-                        column_config={
-                            "index": st.column_config.TextColumn("Factor", width="small"),
-                            t1: st.column_config.NumberColumn(width="small"),
-                            t2: st.column_config.NumberColumn(width="small"),
-                            "Gap": st.column_config.NumberColumn("Advantage", width="small")
-                        }
-                    )
+                col_cfg = {
+                    "index": st.column_config.TextColumn("Factor", width="small"),
+                    t1: st.column_config.NumberColumn(width="small"),
+                    t2: st.column_config.NumberColumn(width="small"),
+                    "Gap": st.column_config.NumberColumn("Advantage", width="small")
+                }
+
+                # --- RENDER STRATEGY ---
+                if mode == "Season Aggregates per Team":
+                    st.markdown("### 4-Factors Season Profile")
+                    c_off, c_def = st.columns(2)
+                    
+                    # 1. Calculate Offense vs League/Opponent
+                    p1_off = get_4f_percentages(t1_off, t1_def)
+                    p2_off = get_4f_percentages(t2_off, t2_def)
+                    df_off = pd.DataFrame([p1_off, p2_off], index=[t1, t2]).T
+                    df_off['Gap'] = df_off[t1] - df_off[t2]
+                    
+                    # 2. Calculate Defense vs League/Opponent
+                    # We pass the opponent's offense (t1_def) as the primary stat, and our defense (t1_off) as the secondary
+                    p1_def = get_4f_percentages(t1_def, t1_off)
+                    p2_def = get_4f_percentages(t2_def, t2_off)
+                    p1_def = {f"Opp {k}": v for k, v in p1_def.items()}
+                    p2_def = {f"Opp {k}": v for k, v in p2_def.items()}
+                    df_def = pd.DataFrame([p1_def, p2_def], index=[t1, t2]).T
+                    df_def['Gap'] = df_def[t1] - df_def[t2]
+                    
+                    with c_off:
+                        st.markdown("**Offensive Identity**")
+                        st.dataframe(build_4f_styler(df_off, False), use_container_width=True, height=175, column_config=col_cfg)
+                    with c_def:
+                        st.markdown("**Defensive Identity (Allowed)**")
+                        st.dataframe(build_4f_styler(df_def, True), use_container_width=True, height=175, column_config=col_cfg)
+                        
+                else:
+                    # For Matchups & Single Games (A Closed System)
+                    st.markdown("### 4-Factors Matchup Identity")
+                    
+                    p1 = get_4f_percentages(s1_plot, s2_plot)
+                    p2 = get_4f_percentages(s2_plot, s1_plot)
+                    
+                    df_4f = pd.DataFrame([p1, p2], index=[t1, t2]).T
+                    df_4f['Gap'] = df_4f[t1] - df_4f[t2]
+                    
+                    c_left, c_mid, c_right = st.columns([1, 2, 1])
+                    with c_mid:
+                        st.dataframe(build_4f_styler(df_4f, False), use_container_width=True, height=175, column_config=col_cfg)
+
     with tab_players:
+        # Determine if we are looking at season-long data (True) or short-term game data (False)
+        is_large_sample_mode = (mode == "Season Aggregates per Team")
+
         if analysis_type == "4-Factors Net Points":
             col_ctrl1, col_ctrl2 = st.columns(2)
             with col_ctrl1: expand_off_def = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_match")
@@ -2546,7 +2555,7 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
                     elif mode == "Head to Head Matchup": df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None, opponent_team=t2)
                     else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, phase if 'phase' in locals() else None)
                 df_p1_f = apply_gp_filter(df_p1, min_gp_filter)
-                display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting)
+                display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
             with p_tabs[1]:
                 if analysis_type == "4-Factors Net Points":
                     if mode == "Games Boxscores": df_p2 = load_single_game_individual(game_record['path'], t2)
@@ -2557,7 +2566,7 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
                     elif mode == "Head to Head Matchup": df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None, opponent_team=t1)
                     else: df_p2 = load_aggregated_classic_individual_data(t2, league, season, phase if 'phase' in locals() else None)
                 df_p2_f = apply_gp_filter(df_p2, min_gp_filter)
-                display_player_table(df_p2_f, f"{t2} Individual Stats", expand_off_def, expand_shooting)
+                display_player_table(df_p2_f, f"{t2} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
         else:
             c_phase = phase if 'phase' in locals() else None
             if analysis_type == "4-Factors Net Points":
@@ -2567,7 +2576,7 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
                 if mode == "Games Boxscores": df_p1 = load_single_game_classic_individual(game_record['path'], t1)
                 else: df_p1 = load_aggregated_classic_individual_data(t1, league, season, c_phase)
             df_p1_f = apply_gp_filter(df_p1, min_gp_filter)
-            display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting)
+            display_player_table(df_p1_f, f"{t1} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
 
 
 # --- GLOSSARY / INTERPRETATION ---
