@@ -1745,16 +1745,25 @@ elif mode == "Team Performance by Game":
                     rival_choice = st.multiselect("Specific Rivals:", all_opponents, default=all_opponents if select_all else [], key="perf_rival_choice")
             st.markdown("---")
 
-            # 5. FILTERING LOGIC
-            allowed_wins = [True if r == "Win" else False for r in res_choice]
-            start_idx, end_idx = all_rnds.index(range_rnds[0]), all_rnds.index(range_rnds[1])
-            allowed_range = all_rnds[start_idx : end_idx+1]
+            # --- 5. FILTERING LOGIC ---
+            # Safe fallbacks to prevent state loss on deployed environments (collapsed expanders / inactive tabs)
+            actual_res_choice = res_choice if res_choice else ["Win", "Loss"]
+            actual_venue_choice = venue_choice if venue_choice else ["Home", "Away"]
+            actual_rival_choice = rival_choice if rival_choice else all_opponents
+
+            allowed_wins = [True if r == "Win" else False for r in actual_res_choice]
+            
+            try:
+                start_idx, end_idx = all_rnds.index(range_rnds[0]), all_rnds.index(range_rnds[1])
+                allowed_range = all_rnds[start_idx : end_idx+1]
+            except Exception:
+                allowed_range = all_rnds
 
             df_filtered = df_team[
                 (df_team['is_win'].isin(allowed_wins)) & 
-                (df_team['venue'].isin(venue_choice)) & 
+                (df_team['venue'].isin(actual_venue_choice)) & 
                 (df_team['round'].isin(allowed_range)) &
-                (df_team['opponent'].isin(rival_choice))
+                (df_team['opponent'].isin(actual_rival_choice))
             ].copy()
 
             if df_filtered.empty:
@@ -1762,7 +1771,6 @@ elif mode == "Team Performance by Game":
             else:
                 # --- TAB SYSTEM ---
                 tab_team_view, tab_player_view = st.tabs(["Team Performance", "Player Performance"])
-
                 with tab_team_view:
                     view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key="perf_view_type_team")
                     if analysis_type == "4-Factors Classic ":
