@@ -1539,12 +1539,9 @@ if mode == "Home":
             
             st.markdown("**OR% (Offensive Rebound %)**")
             st.caption("The percentage of available offensive rebounds grabbed by the attacking team. Used to calculate the value of a single rebound.The value for each league is located in the sidebar in the System & Benchmarks section.")
-        with col_g2:
-            st.markdown("**OR/40**")
-            st.caption("Offensive Rebounds per 40 minutes of play. A more accurate scouting metric for individual players than total rebounds since the OR% per player is not available in the boxscores.")
 
     with tab_4f:
-        st.info("The 4-Factors Net Points model translates percentages into actual points won or lost relative to a league-average performance.")
+        st.info("The 4-Factors Net Points model from Dean Oliver translates percentages into actual points won or lost relative to a league-average performance.")
         col_f1, col_f2 = st.columns(2)
         with col_f1:
             st.markdown("**Shooting Net**")
@@ -1554,7 +1551,7 @@ if mode == "Home":
             st.caption("Calculates the point cost of possessions lost. Each turnover 'costs' the team the average value of a possession (Lg. Effic). On offense, the player turning the ball over gets 100% of the credit, while for team TOs the oncourt players get 20% each. On defense, a stealer gets 90% of the credit while the rest of the teammates oncourt divides the rest (10%). On team TOs the oncourt players of the defensive team get 20% each.")
         with col_f2:
             st.markdown("**Rebounding Net**")
-            st.caption("Measures the impact of second possessions. It accounts for the value of the rebound weighted by the league's overall rebounding efficiency. On offense, the offensive rebounder gets 100% of the credit, while on defense the defensive rebounder gets 70% of the credit while the rest of the teammates oncourt divides the rest (30%)")
+            st.caption("Measures the impact of second possessions. It accounts for the value of the rebound weighted by the league's overall rebounding efficiency. Both on Offense and defense the rebounder gets 40% of the credit while the rest of the teammates oncourt divides the rest (60%)")
             
             st.markdown("**Free Throws Net**")
             st.caption("The difference between actual points made at the line and the expected points based on league average FT volume and efficiency. On offense the FT shooter gets 100% of the credit. On defense, the oncourt players get 20% each.")
@@ -1793,7 +1790,8 @@ elif mode == "Team Performance by Game":
 
                         if analysis_type == "4-Factors Net Points":
                             display_vals = f_off if view_type == "Offensive Impact" else (f_def_inv if view_type == "Defensive Impact" else {k: f_off[k] + f_def_inv[k] for k in f_off})
-                            entry.update({"Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'], "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'], "Total 4F": sum(display_vals.values())})
+                            # Changed "Total 4F" -> "Total NP"
+                            entry.update({"Shooting": display_vals['Shooting'], "Turnovers": display_vals['Turnovers'], "Rebounding": display_vals['Rebounding'], "Free Throws": display_vals['Free Throws'], "Total NP": sum(display_vals.values())})
                         else:
                             # PACE ADJUSTMENT FOR PERFORMANCE TRENDS
                             def get_adj_stats(s):
@@ -1827,9 +1825,10 @@ elif mode == "Team Performance by Game":
                     
                     # --- DEFINE FORMATTING VARIABLES ---
                     if analysis_type == "4-Factors Net Points":
-                        cols_visible = ["Round", "Opp_Logo", "Matchup", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
-                        format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]}
-                        grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total 4F"]
+                        # Moved "Total NP" to the very end of this list
+                        cols_visible = ["Round", "Opp_Logo", "Matchup", "Total NP", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
+                        format_dict = {k: "{:+.2f}" for k in ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total NP"]}
+                        grad_cols = ["Shooting", "Turnovers", "Rebounding", "Free Throws", "Total NP"]
                     else:
                         cols_visible = ["Round", "Opp_Logo", "Matchup", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
                         grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
@@ -1842,16 +1841,16 @@ elif mode == "Team Performance by Game":
                             format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
                             format_dict["FTR"] = "{:.3f}"
 
-                    # --- FIX FOR TEAM PERFORMANCE VIEW GRADIENTS ---
+                    # --- APPLY STYLING & GRADIENTS ---
                     styler = perf_df.style.format(format_dict).map(
                         lambda x: 'color: #27ae60; font-weight: bold;' if x == "W" else ('color: #c0392b; font-weight: bold;' if x == "L" else ''), 
                         subset=['Outcome']
                     )
                     
                     if analysis_type == "4-Factors Net Points":
-                        # SAFETY CHECK: Only apply gradient if there's a range of values
-                        if perf_df['Total 4F'].min() != perf_df['Total 4F'].max():
-                            styler = styler.background_gradient(subset=['Total 4F'], cmap=custom_bluered, vmin=-15, vmax=15)
+                        # Updated safety check and gradient background call to target "Total NP"
+                        if perf_df['Total NP'].min() != perf_df['Total NP'].max():
+                            styler = styler.background_gradient(subset=['Total NP'], cmap=custom_bluered, vmin=-15, vmax=15)
                     else:
                         # SAFETY CHECK FOR CLASSIC STATS
                         if view_type == "Net Impact":
@@ -1929,19 +1928,39 @@ elif mode == "Team Performance by Game":
                             
                             if analysis_type == "4-Factors Net Points":
                                 prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
-                                p_numeric = [f"{prefix}{f}" for f in ["Shooting", "TOV", "ORB", "FT"] if f"{prefix}{f}" in player_df.columns]
+                                
+                                # 1. Determine the primary Net Points metric based on selected view
+                                main_np_col = "Total_NP" if player_view_type == "Net Impact" else f"{prefix}NP"
+                                p_numeric = []
+                                
+                                if main_np_col in player_df.columns:
+                                    p_numeric.append(main_np_col)
+                                
+                                # 2. Gather factor metrics
+                                for f in ["Shooting", "TOV", "ORB", "FT"]:
+                                    col_name = f"{prefix}{f}"
+                                    if col_name in player_df.columns:
+                                        p_numeric.append(col_name)
                                 
                                 exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
                                 exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
 
                                 if exp_off:
+                                    # Add Off_NP and Def_NP if Off/Def breakdown is expanded
+                                    for np_col in ["Off_NP", "Def_NP"]:
+                                        if np_col in player_df.columns and np_col not in p_numeric:
+                                            p_numeric.append(np_col)
+                                            
                                     for f in ["Shooting", "TOV", "ORB", "FT"]:
                                         if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
                                         if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
+                                        
                                 if exp_shoot:
                                     for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
                                         if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+                                        
                             else:
+                                # This handles the classic metrics when "4-Factors Classic" is active
                                 p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
                                 exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
                                 if exp_shoot:
@@ -1950,7 +1969,7 @@ elif mode == "Team Performance by Game":
                             
                             p_cols += [c for c in p_numeric if c in player_df.columns]
                             
-                            # --- NEW: DYNAMIC FOCUS FOR PLAYER TRENDS ---
+                            # --- DYNAMIC FOCUS FOR PLAYER TRENDS ---
                             focus_col, _ = st.columns([1, 3])
                             with focus_col:
                                 p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
