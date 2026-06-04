@@ -1672,10 +1672,9 @@ analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points
 # --- PLAYER AVERAGE LOGIC ---
 st.sidebar.markdown("---")
 avg_mode = st.sidebar.radio(
-	"Player Stats Divisor", 
-	["Scouting (Player GP)", "Season Value (Team GP)"],
-	help="Scouting divides by the games the player actually played. Season Value divides by the total games the team played (dilutes missed games).",
-	key="avg_mode_radio"
+    "Player Stats Divisor", 
+    ["Scouting (Player GP)", "Season Value (Team GP)"],
+    key="avg_mode_radio"
 )
 # --- ADD THIS LINE: Reserve an empty space for future filters ---
 sidebar_filters = st.sidebar.container()
@@ -1701,6 +1700,8 @@ if mode == "Home":
         with open(ingame_logo_path, "rb") as f:
             logo_base64 = base64.b64encode(f.read()).decode()
 
+    # NOTE: The body (the long string) and the parameter unsafe_allow_html=True 
+    # must both be inside the st.markdown() parentheses.
     st.markdown(f"""
         <div style="text-align: center; padding: 40px 0px;">
             {'<img src="data:image/png;base64,' + logo_base64 + '" width="80" style="margin-bottom: 20px;">' if logo_base64 else ''}
