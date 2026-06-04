@@ -1700,7 +1700,7 @@ if mode == "Home":
         with open(ingame_logo_path, "rb") as f:
             logo_base64 = base64.b64encode(f.read()).decode()
 
-    # 2. Build the string
+    # 2. Build the string (keep your existing logo logic)
     html_content = f"""
     <div style="text-align: center; padding: 40px 0px;">
         {'<img src="data:image/png;base64,' + logo_base64 + '" width="80" style="margin-bottom: 20px;">' if logo_base64 else ''}
@@ -1709,8 +1709,8 @@ if mode == "Home":
     </div>
     """
 
-    # 3. Render using clear, explicit arguments
-    st.markdown(body=html_content, unsafe_allow_html=True)
+    # 3. Use st.html instead of st.markdown
+    st.html(html_content)
     
     c1, c2 = st.columns(2)
     with c1:
