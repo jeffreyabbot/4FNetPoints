@@ -1615,16 +1615,7 @@ st.markdown("""
 		[data-testid="stSidebar"] button p {
 			color: white !important;
 		}
-		/* Removes the weird square/box next to sidebar labels */
-		[data-testid="stSidebar"] div[data-baseweb="radio"] > div > div:first-child,
-		[data-testid="stSidebar"] label div:empty {
-			display: none !important;
-		}
-
-		/* Specifically target the radio/selection label container */
-		[data-testid="stSidebar"] .stRadio > label {
-			margin-bottom: 0 !important;
-		}
+		
 		/* PHASE 12: EXPANDERS (The specific fix for your screenshot) */
 		/* This forces the header of the expander to NOT turn white on hover */
 		[data-testid="stSidebar"] [data-testid="stExpander"] {
