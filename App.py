@@ -1693,22 +1693,24 @@ avg_orb = lg_orb_pct
 
 st.sidebar.markdown("---")
 if mode == "Home":
-    # Construct the base64 string for InGame.png
+    # 1. Prepare Logo
     ingame_logo_path = os.path.join(LOGOS_PATH, "InGame.png")
     logo_base64 = ""
     if os.path.exists(ingame_logo_path):
         with open(ingame_logo_path, "rb") as f:
             logo_base64 = base64.b64encode(f.read()).decode()
 
-    # NOTE: The body (the long string) and the parameter unsafe_allow_html=True 
-    # must both be inside the st.markdown() parentheses.
-    st.markdown(f"""
-        <div style="text-align: center; padding: 40px 0px;">
-            {'<img src="data:image/png;base64,' + logo_base64 + '" width="80" style="margin-bottom: 20px;">' if logo_base64 else ''}
-            <h1 style="font-size: 3.5rem; margin-bottom: 10px;">Basketball 4-Factors Scouting</h1>
-            <p style="font-size: 1.2rem; color: #666;">Advanced Analytics & Situational Performance Tool</p>
-        </div>
-    """, unsafe_allow_html=True)
+    # 2. Build the string
+    html_content = f"""
+    <div style="text-align: center; padding: 40px 0px;">
+        {'<img src="data:image/png;base64,' + logo_base64 + '" width="80" style="margin-bottom: 20px;">' if logo_base64 else ''}
+        <h1 style="font-size: 3.5rem; margin-bottom: 10px;">Basketball 4-Factors Scouting</h1>
+        <p style="font-size: 1.2rem; color: #666;">Advanced Analytics & Situational Performance Tool</p>
+    </div>
+    """
+
+    # 3. Render using clear, explicit arguments
+    st.markdown(body=html_content, unsafe_allow_html=True)
     
     c1, c2 = st.columns(2)
     with c1:
