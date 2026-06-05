@@ -2791,7 +2791,7 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				st.warning("No data found.")
 				return
 
-			tab_table, tab_radar = st.tabs(["📊 Table", "🎯 Shot Radar"])
+			tab_table, tab_radar = st.tabs(["Table", "Shot Radar"])
 
 			with tab_table:
 				display_player_table(df_table, f"{team_name} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
