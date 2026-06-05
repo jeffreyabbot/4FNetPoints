@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import io
 import base64
 import unicodedata
+from difflib import SequenceMatcher
 #python -m streamlit run app.py   (para hacerlo funcionar)
 # --- CONFIGURATION ---
 DATA_BASE_PATH = "informes_data"
@@ -41,10 +42,18 @@ def clean_num(val):
 def clean_player_name(text):
 	if not text or pd.isna(text):
 		return ""
-	text = str(text).strip()
+	text = str(text).strip().upper()
+	
 	# 1. Remove jersey patterns: #0, #00, 12., 05 -, etc. at the start
-	# This regex looks for start of string, optional #, then digits, then optional separator
 	text = re.sub(r'^(#?\d+[\s\.\-]*)+', '', text)
+	
+	# 2. Fix missing spaces after initials (M.CALANCHE -> M. CALANCHE)
+	text = re.sub(r'([A-Z])\.(?=[A-Z])', r'\1. ', text)
+	
+	# 3. Strip accents to prevent duplicates (GONZÁLEZ -> GONZALEZ)
+	import unicodedata
+	text = unicodedata.normalize('NFKD', text).encode('ascii', 'ignore').decode('utf-8')
+	
 	return text.strip()
 # --- HELPERS ---
 @st.cache_data
@@ -330,10 +339,6 @@ def get_team_icon(team_name, current_league=None):
 	return None
 
 def load_single_game_individual(file_path, target_team):
-	"""
-	Finds the individual player file for a specific game and filters it 
-	for the target team using a space-insensitive Match Key.
-	"""
 	try:
 		# 1. Path Setup: Locate the 'individual' folder relative to the raw file
 		phase_folder = os.path.dirname(os.path.dirname(file_path))
@@ -342,21 +347,18 @@ def load_single_game_individual(file_path, target_team):
 		if not os.path.exists(individual_dir):
 			return None
 
-		# 2. Extract target Game ID from the raw filename (e.g., 2486849)
+		# 2. Extract target Game ID from the raw filename
 		raw_name = os.path.basename(file_path)
 		match = re.search(r'(\d+)', raw_name)
 		if not match: 
 			return None
 		target_id = str(match.group(1))
 
-		# 3. Search for the player file in the individual directory
-		# Matches if the ID is anywhere in the filename (handles _PROCESSED_CHRONO, etc.)
+		# 3. Search for the player file
 		matching_file = None
 		for f in os.listdir(individual_dir):
 			if not f.startswith("NP_"): 
 				continue
-			
-			# Find all numbers in the filename
 			nums_in_file = re.findall(r'\d+', f)
 			if nums_in_file and target_id == nums_in_file[0]:
 				matching_file = f
@@ -369,24 +371,23 @@ def load_single_game_individual(file_path, target_team):
 		full_path = os.path.join(individual_dir, matching_file)
 		df = pd.read_excel(full_path)
 		
+		# Ensure 'Player' column is standardized
+		p_col = next((c for c in df.columns if c.upper() == 'PLAYER'), 'Player')
+		if p_col != 'Player':
+			df = df.rename(columns={p_col: 'Player'})
+            
 		# 5. Clean up the dataframe (Remove 'TOTAL' summary rows)
-		if 'Player' in df.columns:
-			df = df[~df['Player'].astype(str).str.contains('TOTAL', na=False, case=False)]
-		elif 'PLAYER' in df.columns:
-			df = df[~df['PLAYER'].astype(str).str.contains('TOTAL', na=False, case=False)]
+		df = df[~df['Player'].astype(str).str.contains('TOTAL|EQUIP|TEAM', na=False, case=False)]
 
-		# 6. Define the "Super Normalized" Match Key (Ignores spaces, dots, and accents)
+		# 6. Define the Match Key
 		def make_match_key(text):
-			if not text or pd.isna(text): 
-				return ""
-			# normalize_str handles accents and uppercase
+			if not text or pd.isna(text): return ""
 			s = normalize_str(str(text))
-			# Remove dots and all whitespace
 			return re.sub(r'[\s\.]+', '', s)
 
 		nk_target = make_match_key(target_team)
 
-		# 7. Identify the Team Column (Handles 'Team', 'EQUIP', 'EQUIPO', etc.)
+		# 7. Identify the Team Column
 		team_col = None
 		for col in df.columns:
 			if col.strip().upper() in ['TEAM', 'EQUIP', 'EQUIPO', 'CLUB', 'EQUIPOS']:
@@ -396,19 +397,19 @@ def load_single_game_individual(file_path, target_team):
 		if not team_col:
 			return None
 
-		# 8. Apply the match (Exact key match or fuzzy containment)
+		# 8. Apply the match
 		def is_team_match(row_val):
 			nk_row = make_match_key(row_val)
-			if not nk_row or not nk_target: 
-				return False
-			# Match if identical keys OR one is contained in the other
+			if not nk_row or not nk_target: return False
 			return (nk_row == nk_target) or (nk_row in nk_target and len(nk_row) > 4) or (nk_target in nk_row)
 
 		mask = df[team_col].apply(is_team_match)
 		df_filtered = df[mask].copy()
 
+		# --- THE CRITICAL FIX: CLEAN NAMES TO SYNC WITH THE RADAR ---
+		df_filtered['Player'] = df_filtered['Player'].apply(clean_player_name)
+
 		# 9. Safety: Ensure GP column exists
-		# Normalize existing GP column name if it exists (gp -> GP)
 		for col in df_filtered.columns:
 			if col.strip().upper() == 'GP':
 				df_filtered = df_filtered.rename(columns={col: 'GP'})
@@ -416,17 +417,10 @@ def load_single_game_individual(file_path, target_team):
 		
 		if 'GP' not in df_filtered.columns:
 			df_filtered['GP'] = 1
-		
-		# Ensure 'Player' column is standardized for the groupby later
-		for col in df_filtered.columns:
-			if col.strip().upper() == 'PLAYER':
-				df_filtered = df_filtered.rename(columns={col: 'Player'})
-				break
 
 		return df_filtered
 		
 	except Exception as e:
-		# st.error(f"Error loading individual file: {e}")
 		return None
 def get_h2h_stats(t1, t2, league, season):
 	def make_match_key(text):
@@ -628,40 +622,61 @@ def get_per_game_volumes(team_name, league, season, row_label="TOTAL"):
 		"pts_fb": stats_acc["pts_fb"] / total_gp
 	}
 def load_individual_aggregate(team_name, league, season, phase=None):
-	if phase is None or not isinstance(phase, str) or phase == "":
-		folder_phase = "Regular_Season"
-	else:
-		folder_phase = phase.split(" - ")[0].replace(" ", "_")
-	
-	file_path = os.path.join(
-		DATA_BASE_PATH, league, season, folder_phase, 
-		"aggregate_individual", f"AGG_IND_{team_name}.xlsx"
-	)
+    if phase is None or not isinstance(phase, str) or phase == "":
+        folder_phase = "Regular_Season"
+    else:
+        folder_phase = phase.split(" - ")[0].replace(" ", "_")
+    
+    file_path = os.path.join(
+        DATA_BASE_PATH, league, season, folder_phase, 
+        "aggregate_individual", f"AGG_IND_{team_name.strip()}.xlsx"
+    )
 
-	if not os.path.exists(file_path):
-		return None
+    if not os.path.exists(file_path):
+        return None
 
-	try:
-		# Load the player file
-		df = pd.read_excel(file_path)
-		df = df[~df['Player'].astype(str).str.contains('--- TOTAL ---', na=False, case=False)].copy()
-		
-		# Determine Divisor
-		if avg_mode == "Season Value (Team GP)":
-			team_stats = get_per_game_volumes(team_name, league, season)
-			divisor = float(team_stats.get('gp', 1))
-		else:
-			# Scouting mode: Each row is divided by its own GP
-			divisor = df['GP'].replace(0, 1)
+    try:
+        df = pd.read_excel(file_path)
+        p_col = next((c for c in df.columns if c.upper() == 'PLAYER'), 'Player')
+        all_teams = get_teams_in_league(league, season)
+        
+        def is_valid_player_row(val):
+            val_str = str(val).upper().strip()
+            if any(term in val_str for term in ['TOTAL', '---', 'EQUIP', 'TEAM', 'ENTRENADOR']): return False
+            if any(team.upper() == val_str for team in all_teams): return False
+            if len(val_str) < 2: return False # Changed to 2 to allow "LO"
+            return True
 
-		numeric_cols = df.select_dtypes(include=['number']).columns
-		for col in numeric_cols:
-			if col != 'GP': 
-				df[col] = df[col] / divisor
-				
-		return df
-	except Exception:
-		return None
+        df = df[df[p_col].apply(is_valid_player_row)].copy()
+        
+        # --- THE FIX: CLEAN NAMES AND MERGE DUPLICATES ---
+        df[p_col] = df[p_col].apply(clean_player_name)
+        
+        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
+        if 'GP' in df.columns and 'GP' not in numeric_cols:
+            df['GP'] = pd.to_numeric(df['GP'], errors='coerce').fillna(0)
+            numeric_cols.append('GP')
+            
+        # Group by the newly cleaned player name to combine their stats!
+        df = df.groupby(p_col, as_index=False)[numeric_cols].sum()
+        
+        # --- Divisor logic ---
+        if avg_mode == "Season Value (Team GP)":
+            team_stats = get_per_game_volumes(team_name, league, season)
+            divisor = float(team_stats.get('gp', 1))
+        else:
+            divisor = df['GP'].replace(0, 1)
+
+        numeric_cols = df.select_dtypes(include=['number']).columns
+        for col in numeric_cols:
+            if col != 'GP': 
+                df[col] = df[col] / divisor
+                
+        return df
+        
+    except Exception as e:
+        st.write(f"DEBUG: Error loading {team_name}: {e}")
+        return None
 def load_single_game_classic_individual(file_path, target_team):
 	try:
 		df = pd.read_excel(file_path, header=None)
@@ -681,6 +696,7 @@ def load_single_game_classic_individual(file_path, target_team):
 		nk_t1 = make_match_key(t1_name)
 		nk_t2 = make_match_key(t2_name)
 
+		# --- REVERTED TO YOUR ORIGINAL PERFECT SLICING ---
 		if nk_target == nk_t1 or nk_target in nk_t1 or nk_t1 in nk_target:
 			start_idx = 3
 			end_idx = total_rows[0]
@@ -715,21 +731,14 @@ def load_single_game_classic_individual(file_path, target_team):
 		t_mp = parse_min(t_row.get(38, "200:00"))
 		df_players['Team_MP'] = t_mp if t_mp > 0 else 200.0
 
-		# --- THE ULTIMATE HARDCODED RENAME DICTIONARY ---
-		# Uses your exact indices to guarantee the radar gets its data
 		rename_dict = {
-            0: "Player", 1: "PTS", 2: "F2M", 3: "F2A", 4: "F3M", 5: "F3A",
-            6: "FTM", 7: "FTA", 
-            8: "AS",    # <--- ADD THIS LINE HERE
-            9: "DRB", 10: "ORB", 14: "TOV",
-            19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break",
-            23: "RIM FGM", 24: "RIM FGA",
-            26: "PAINT FGM", 27: "PAINT FGA",
-            29: "MR FGM", 30: "MR FGA",
-            32: "COR3 FGM", 33: "COR3 FGA",
-            35: "ATB3 FGM", 36: "ATB3 FGA",
-            38: "MIN_STR"
-        }
+			0: "Player", 1: "PTS", 2: "F2M", 3: "F2A", 4: "F3M", 5: "F3A",
+			6: "FTM", 7: "FTA", 8: "AS", 9: "DRB", 10: "ORB", 14: "TOV",
+			19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break",
+			23: "RIM FGM", 24: "RIM FGA", 26: "PAINT FGM", 27: "PAINT FGA",
+			29: "MR FGM", 30: "MR FGA", 32: "COR3 FGM", 33: "COR3 FGA",
+			35: "ATB3 FGM", 36: "ATB3 FGA", 38: "MIN_STR"
+		}
 		
 		df_players = df_players.rename(columns=rename_dict)
 		df_players['Player'] = df_players['Player'].apply(clean_player_name)
@@ -746,18 +755,16 @@ def load_single_game_classic_individual(file_path, target_team):
 		valid_cols = [c for c in cols_to_keep if c in df_players.columns]
 		df_players = df_players[valid_cols]
 
-		df_players = df_players.dropna(subset=['Player'])
-		df_players = df_players[df_players['Player'].astype(str).str.strip() != ""]
-		
-		garbage = ['JUGADOR', 'ASISTENCIA', 'LUGAR', 'PABELLÓN', 'ÁRBITRO', 'ARBITRO', 'TOTAL', 'EQUIP', 'ENTRENADOR']
-		df_players = df_players[~df_players['Player'].astype(str).str.upper().apply(lambda x: any(g in x for g in garbage))]
-		
-		df_players['PTS'] = pd.to_numeric(df_players['PTS'], errors='coerce')
-		df_players = df_players.dropna(subset=['PTS'])
+		# --- THE MASTER FILTER: KEEP ONLY PLAYERS WHO ACTUALLY PLAYED ---
+		# This instantly deletes Team Names, Arenas, Referees, and Headers without needing a garbage list!
+		df_players = df_players[df_players['MIN'] > 0].copy()
+
+		# Now it is safe to fill NaN points with 0, saving Arevalo!
+		df_players['PTS'] = pd.to_numeric(df_players['PTS'], errors='coerce').fillna(0.0)
 
 		# Ensure all math columns are numbers
 		for c in valid_cols:
-			if c not in ["Player", "MIN"]:
+			if c not in ["Player", "MIN", "PTS"]:
 				df_players[c] = pd.to_numeric(df_players[c], errors='coerce').fillna(0.0)
 
 		df_players['Team_Name'] = target_team
@@ -1665,7 +1672,7 @@ st.sidebar.markdown("---")
 st.sidebar.title("Scouting 4F")
 mode = st.sidebar.radio(
 	"View Mode", 
-	["Home", "Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], 
+	["Home", "Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores", "Team Performance by Game", "Overall League Standings", "Run System Diagnostics"], 
 	key="mode_radio"
 )
 analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points", "4-Factors Classic "], key="analysis_type")
@@ -2457,7 +2464,7 @@ elif mode == "Overall League Standings":
 				st.markdown(f"### {title_prefix} Impact ({selected_phase})")
 				
 				# USING YOUR ORIGINAL RENDERER (It handles the Classic columns perfectly!)
-				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)
+				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)	
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
 	df_f = df_league[df_league['season'] == season].copy()
@@ -2778,75 +2785,83 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				return df[mask].copy()
 			return df
 
-		# --- DUAL-DATA RENDERER (Final Sync Version) ---
+		# --- DUAL-DATA RENDERER ---
 		def render_table_and_radar(df_table, df_zones, team_name, suffix):
-			"""
-			Renders the player performance data using a tabbed interface.
-			The table tab provides the statistical breakdown, and the radar tab 
-			provides the visual shot-zone analysis.
-			"""
 			if df_table is None or df_table.empty:
 				st.warning("No data found.")
 				return
 
-			# Use tabs to ensure responsiveness on small screens and cleaner printing
-			tab_table, tab_radar = st.tabs(["Table", "Shot Radar"])
+			tab_table, tab_radar = st.tabs(["📊 Table", "🎯 Shot Radar"])
 
 			with tab_table:
-				# Renders the main statistical table
-				display_player_table(
-					df_table, 
-					f"{team_name} Individual Stats", 
-					expand_off_def, 
-					expand_shooting, 
-					is_large_sample_mode
-				)
+				display_player_table(df_table, f"{team_name} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
 
 			with tab_radar:
-				
 				try:
-					def sn(t): return re.sub(r'[^A-Z0-9]', '', normalize_str(clean_player_name(t)))
-					
+					def deep_clean_name(name):
+						if not name or pd.isna(name): return "", set()
+						n = re.sub(r'\.(?=[A-Za-z])', '. ', str(name))
+						n = re.sub(r'[\d\.\#\-\,]+', '', n.upper())
+						n = normalize_str(n)
+						# Keep words > 1 char (keeps LO, BA, SY, drops initials like M)
+						words = [w for w in n.split() if len(w) > 1]
+						return " ".join(words), set(words)
+
 					p_col_t = next((c for c in df_table.columns if c.upper() == 'PLAYER'), 'Player')
-					valid_players = [
-						p for p in df_table[p_col_t].unique() 
-						if not any(x in str(p).upper() for x in ["TEAM", "TOTAL"])
-					]
+					
+					# Filter valid players for the dropdown
+					valid_players = []
+					for p in df_table[p_col_t].unique():
+						p_str = str(p).upper().strip()
+						if len(p_str) >= 2 and not any(x in p_str for x in ["TOTAL", "TEAM", "EQUIP"]):
+							valid_players.append(p)
 					
 					if not valid_players:
 						st.info("No player data available for radar.")
 					else:
-						# --- WITH THESE LINES ---
-						col_sel, _ = st.columns([0.3, 0.7]) # [0.3, 0.7] keeps the box tight on the left
+						col_sel, _ = st.columns([0.3, 0.7])
 						with col_sel:
-							sel_p = st.selectbox("Select Player:", valid_players, key=f"rad_sel_{suffix}")
-						# ---------------------------
+							sel_p = st.selectbox("Select Player:", sorted(valid_players), key=f"rad_sel_{suffix}")
 						
-						# A. AUTHENTIC BENCHMARKS
 						eff = float(lg_effic)
 						orb_p = float(lg_orb_pct)
 						
-						# B. DIVISOR SYNC
 						row_t = df_table[df_table[p_col_t] == sel_p].iloc[0]
 						div = float(row_t.get('GP', 1))
 
 						if df_zones is not None and not df_zones.empty:
-							target_key = sn(sel_p)
-							p_row_z = df_zones[df_zones[p_col_t].apply(lambda x: sn(x) == target_key)]
+							p_col_z = next((c for c in df_zones.columns if c.upper() == 'PLAYER'), 'Player')
+							target_clean, target_words = deep_clean_name(sel_p)
+							
+							def is_match(raw_val):
+								raw_clean, raw_words = deep_clean_name(raw_val)
+								# Safety fallback
+								if not raw_words or not target_words: 
+									from difflib import SequenceMatcher
+									return SequenceMatcher(None, target_clean, raw_clean).ratio() > 0.8
+								
+								# Shared surname logic (If they share 'CALANCHE', it's him)
+								if not target_words.isdisjoint(raw_words):
+									return True
+								
+								from difflib import SequenceMatcher
+								return SequenceMatcher(None, target_clean, raw_clean).ratio() > 0.7
+							
+							matches = df_zones[df_zones[p_col_z].apply(is_match)]
 
-							if not p_row_z.empty:
-								p_row_z = p_row_z.iloc[0]
+							if not matches.empty:
+								p_row_z = matches.iloc[0]
 								pgp = float(p_row_z.get('GP', 1))
 
-								# Helper to get raw totals
 								def get_t(k): 
-									upper_cols = {str(c).upper(): c for c in p_row_z.index}
+									upper_cols = {str(c).upper().strip(): c for c in p_row_z.index}
 									actual_key = upper_cols.get(k.upper())
-									return float(p_row_z[actual_key]) * pgp if actual_key else 0.0
+									val = p_row_z[actual_key] if actual_key else 0.0
+									return float(val) * pgp
 
-								# C. RADAR CALCULATION
 								def calc_z_net(m_key, a_key, p_val):
 									m, a = get_t(m_key), get_t(a_key)
+									if div == 0: return 0.0
 									net = (m * p_val) - (m * eff) - ((a - m) * (1 - orb_p) * eff)
 									return (net * 0.60) / div
 
@@ -2858,31 +2873,51 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 									calc_z_net('ATB3 FGM', 'ATB3 FGA', 3)
 								]
 
-								# D. SPACING & ASSISTS RESIDUAL
-								row_t_upper = {str(k).upper(): v for k, v in row_t.items()}
-								val_2p = float(row_t_upper.get('OFF_2P', 0))
-								val_3p = float(row_t_upper.get('OFF_3P', 0))
-								shooting_table_sum = val_2p + val_3p
-								shooting_radar_sum = sum(radar_nets)
-								residual_impact = shooting_table_sum - shooting_radar_sum
-
-								# E. DISPLAY
-								st.plotly_chart(
-									plot_precision_component_radar(radar_nets, sel_p), 
-									use_container_width=True, 
-									key=f"radar_chart_{suffix}_{sn(sel_p)}" 
-								)
-
-								st.markdown("---")
-								st.markdown(f"**Offensive Attribution for {sel_p}**")
-								c1, c2, c3 = st.columns(3)
-								c1.metric("Total Offensive Shooting Net", f"{shooting_table_sum:+.2f}")
-								c2.metric("Pure Shot Finishing", f"{shooting_radar_sum:+.2f}")
-								c3.metric("Spacing & Assists", f"{residual_impact:+.2f}")
-								st.caption(f"Scale: {div:.0f} games | Effic: {eff:.2f}")
-				
+								if sum([abs(x) for x in radar_nets]) > 0.01:
+									st.plotly_chart(plot_precision_component_radar(radar_nets, sel_p), use_container_width=True)
+									
+									row_t_upper = {str(k).upper(): v for k, v in row_t.items()}
+									val_2p = float(row_t_upper.get('OFF_2P', 0))
+									val_3p = float(row_t_upper.get('OFF_3P', 0))
+									st.markdown("---")
+									st.markdown(f"**Offensive Attribution for {sel_p}**")
+									c1, c2, c3 = st.columns(3)
+									c1.metric("Total Shot Net", f"{(val_2p+val_3p):+.2f}")
+									c2.metric("Finishing (Radar Sum)", f"{sum(radar_nets):+.2f}")
+									c3.metric("Spacing/Creation", f"{(val_2p+val_3p-sum(radar_nets)):+.2f}")
+								else:
+									st.info(f"Shot zone data for {sel_p} is empty (0/0 shots).")
+							else:
+								st.warning(f"Could not link shot zone data for {sel_p}. (Data mismatch between sources)")
+								
+								# --- DEBUG VISUALIZER ---
+								st.error("🚨 DEBUGGING MODE ACTIVE")
+								st.write(f"**Target Player Selected:** `{sel_p}`")
+								st.write(f"**Target Words Searched:** `{target_words}`")
+								
+								st.write("**Here is every player the radar found in the Boxscore Data (`df_zones`) for this team:**")
+								
+								# Build a dataframe to show what the computer sees
+								available_names = df_zones[p_col_z].unique()
+								debug_data = []
+								for raw_n in available_names:
+									cln, wrds = deep_clean_name(raw_n)
+									
+									# Calculate the fuzzy ratio just to see what it was
+									from difflib import SequenceMatcher
+									fuzzy_ratio = SequenceMatcher(None, target_clean, cln).ratio()
+									
+									debug_data.append({
+										"1. Raw Name in File": raw_n,
+										"2. Cleaned Name": cln,
+										"3. Extracted Words": str(wrds),
+										"4. Fuzzy Match %": f"{fuzzy_ratio:.1%}"
+									})
+								
+								st.dataframe(pd.DataFrame(debug_data), use_container_width=True)
+								# --- END DEBUG VISUALIZER ---
 				except Exception as e:
-					st.error(f"Error loading radar: {e}")
+					st.error(f"Radar Error: {e}")
 
 		# --- DATA ROUTING ---
 		is_h2h = t2 != "League Average"
