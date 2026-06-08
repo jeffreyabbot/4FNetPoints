@@ -1672,7 +1672,7 @@ st.sidebar.markdown("---")
 st.sidebar.title("Scouting 4F")
 mode = st.sidebar.radio(
 	"View Mode", 
-	["Home", "Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores", "Team Performance by Game", "Overall League Standings", "Run System Diagnostics"], 
+	["Home", "Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores", "Team Performance by Game", "Overall League Standings"], 
 	key="mode_radio"
 )
 analysis_type = st.sidebar.selectbox("Analysis Category", ["4-Factors Net Points", "4-Factors Classic "], key="analysis_type")
@@ -2418,31 +2418,44 @@ elif mode == "Overall League Standings":
 			)
 
 # --- THE PLAYER TAB LOGIC ---
+	# --- THE PLAYER TAB LOGIC ---
 	with tab_standings_players:
-		# The Checkboxes (You can keep them visible, they just won't trigger anything in Classic)
-		col_ctrl_l1, col_ctrl_l2 = st.columns(2)
+		# 1. UI Filter Controls
+		col_ctrl_l1, col_ctrl_l2, col_ctrl_l3 = st.columns([1, 1, 1])
 		with col_ctrl_l1:
 			exp_ld_offdef = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_ld")
 		with col_ctrl_l2:
 			exp_ld_shoot = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_ld")
+		with col_ctrl_l3:
+			# Direct GP Filter added here
+			min_gp_ld = st.number_input("Min. Games Played (GP)", min_value=1, value=5, step=1, key="gp_filter_ld")
 		
+		# 2. Added Note for the user
+		st.info(f"Note: Displaying players with a minimum of {min_gp_ld} games played.")
 		st.markdown("---")
 
 		with st.spinner("Gathering league-wide player data..."):
-			# --- THE FIX: CALL THE CORRECT DATA GATHERER BASED ON VIEW ---
+			# --- CALL DATA GATHERER ---
 			if analysis_type == "4-Factors Net Points":
 				df_league_players = get_league_player_leaderboard(league, season, selected_phase, avg_mode)
 			else:
 				df_league_players = get_league_player_leaderboard_classic_v4(league, season, selected_phase, avg_mode)
 			
-			# --- FILTER THE PLAYERS TO ONLY THOSE IN THE SELECTED GROUP ---
+			# --- FILTER BY SELECTED TEAMS ---
 			if df_league_players is not None and not df_league_players.empty:
 				df_league_players = df_league_players[df_league_players['Team_Name'].isin(teams_to_analyze)]
+				
+				# --- NEW: APPLY THE GP FILTER DIRECTLY ---
+				gp_col = next((c for c in df_league_players.columns if c.upper() == 'GP'), 'GP')
+				if gp_col in df_league_players.columns:
+					# Ensure numeric comparison
+					df_league_players[gp_col] = pd.to_numeric(df_league_players[gp_col], errors='coerce').fillna(0)
+					df_league_players = df_league_players[df_league_players[gp_col] >= min_gp_ld]
 			
 			if df_league_players is None or df_league_players.empty:
-				st.warning("No individual player data found for this selection.")
+				st.warning(f"No individual player data found with at least {min_gp_ld} games played.")
 			else:
-				# Sorting logic based on mode
+				# Sorting logic
 				if analysis_type == "4-Factors Net Points":
 					if view_type == "Offensive Impact":
 						sort_col, title_prefix = 'Off_NP', "Top 100 Offensive"
@@ -2453,18 +2466,17 @@ elif mode == "Overall League Standings":
 				else:
 					sort_col, title_prefix = 'PTS', "Top 100 Classic"
 
-				# Safely fallback to another column if sort_col is missing
+				# Safe fallback if column is missing
 				if sort_col not in df_league_players.columns:
 					numeric_cols = df_league_players.select_dtypes(include=['number']).columns
-					if len(numeric_cols) > 0: sort_col = numeric_cols[0]
-					else: sort_col = df_league_players.columns[0]
+					sort_col = numeric_cols[0] if not numeric_cols.empty else df_league_players.columns[0]
 
 				df_leaderboard = df_league_players.sort_values(sort_col, ascending=False)
 				
 				st.markdown(f"### {title_prefix} Impact ({selected_phase})")
 				
-				# USING YOUR ORIGINAL RENDERER (It handles the Classic columns perfectly!)
-				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)	
+				# Render the table
+				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
 	df_f = df_league[df_league['season'] == season].copy()
