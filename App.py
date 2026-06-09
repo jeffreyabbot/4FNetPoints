@@ -56,6 +56,7 @@ def clean_player_name(text):
 	
 	return text.strip()
 # --- HELPERS ---
+
 @st.cache_data
 def get_league_zone_benchmarks(league, season):
 	"""
@@ -102,6 +103,7 @@ def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sa
 		return '' # Don't color text if the background is already colored
 	try:
 		v = float(val)
+		c_norm = str(col_name).upper().strip()
 		
 		# --- DEFINE THRESHOLDS BASED ON SAMPLE SIZE ---
 		if is_large_sample:
@@ -124,37 +126,54 @@ def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sa
 			sit_elite, sit_poor = 3.0, 0.5
 
 		# 1. Net Points Thresholds
-		if any(x in col_name for x in ['Net_', 'Total_NP', 'Off_', 'Def_']):
+		if any(x in c_norm for x in ['NET_', 'TOTAL_NP', 'OFF_', 'DEF_']):
 			if v >= np_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= np_poor: return 'color: #6fa8dc; font-weight: bold;'
 		
 		# 2. USG% - Alpha Scorer vs Role Player
-		if col_name == 'USG%':
+		if 'USG' in c_norm:
 			if v >= usg_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= usg_poor: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 3. eFG% - Shooting Efficiency
-		if col_name == 'eFG%':
+		# 3. Shooting Efficiency: eFG% & TS%
+		if 'EFG' in c_norm:
 			ref = globals().get('avg_efg', 0.52)
 			if v >= ref + efg_margin: return 'color: #e06666; font-weight: bold;'
 			if v <= ref - efg_margin: return 'color: #6fa8dc; font-weight: bold;'
 
+		if 'TS%' in c_norm:
+			ref = globals().get('avg_efg', 0.52) + 0.03  # TS% is typically slightly higher
+			if v >= ref + efg_margin: return 'color: #e06666; font-weight: bold;'
+			if v <= ref - efg_margin: return 'color: #6fa8dc; font-weight: bold;'
+
 		# 4. TO% - Ball Security (Lower is better)
-		if col_name == 'TO%':
+		if 'TO%' in c_norm or 'TOV%' in c_norm:
 			ref = globals().get('avg_to', 0.16)
 			if v <= ref - to_margin: return 'color: #e06666; font-weight: bold;'
 			if v >= ref + to_margin: return 'color: #6fa8dc; font-weight: bold;'
 
 		# 5. OR% - Rebounding Skill
-		if col_name == 'OR%':
+		if 'OR%' in c_norm or 'ORB%' in c_norm:
 			if v >= or_elite: return 'color: #e06666; font-weight: bold;'
 
 		# 6. FTR - Foul Drawing
-		if col_name == 'FTR':
+		if 'FTR' in c_norm:
 			if v >= ftr_elite: return 'color: #e06666; font-weight: bold;'
 
-		# 7. Situational Volumes (Per Game or Per 100)
-		if col_name in ['Pts_off_TO', '2nd_Chance', 'Fast_Break']:
+		# 7. AST/TO Ratio (Ball Security / Distribution)
+		if 'AST/TO' in c_norm:
+			ast_to_elite = 2.5 if is_large_sample else 3.0
+			ast_to_poor = 0.8 if is_large_sample else 0.5
+			if v >= ast_to_elite: return 'color: #e06666; font-weight: bold;'
+			if v <= ast_to_poor: return 'color: #6fa8dc; font-weight: bold;'
+
+		# 8. Points per Play
+		if 'PLAY' in c_norm and 'PTS' in c_norm:
+			if v >= 1.20: return 'color: #e06666; font-weight: bold;'
+			if v <= 0.85: return 'color: #6fa8dc; font-weight: bold;'
+
+		# 9. Situational Volumes (Per Game or Per 100)
+		if any(x in c_norm for x in ['PTS_OFF_TO', 'PTSS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK']):
 			if v >= sit_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= sit_poor: return 'color: #6fa8dc; font-weight: bold;'
 	except:
@@ -737,7 +756,14 @@ def load_single_game_classic_individual(file_path, target_team):
 			19: "Pts_off_TO", 20: "2nd_Chance", 21: "Fast_Break",
 			23: "RIM FGM", 24: "RIM FGA", 26: "PAINT FGM", 27: "PAINT FGA",
 			29: "MR FGM", 30: "MR FGA", 32: "COR3 FGM", 33: "COR3 FGA",
-			35: "ATB3 FGM", 36: "ATB3 FGA", 38: "MIN_STR"
+			35: "ATB3 FGM", 36: "ATB3 FGA", 38: "MIN_STR",
+			# CORRECT INDICES FROM RAW FILES:
+			39: "Plays",
+			40: "eFG%",
+			41: "TS%",
+			42: "Pts/Play",
+			44: "FTR",
+			45: "AST/TO"
 		}
 		
 		df_players = df_players.rename(columns=rename_dict)
@@ -749,7 +775,9 @@ def load_single_game_classic_individual(file_path, target_team):
 			"Pts_off_TO", "2nd_Chance", "Fast_Break", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", 
 			"Team_ORB", "Opp_DRB", "Team_MP", 
 			"RIM FGA", "RIM FGM", "PAINT FGA", "PAINT FGM", "MR FGA", "MR FGM", 
-			"COR3 FGA", "COR3 FGM", "ATB3 FGA", "ATB3 FGM"
+			"COR3 FGA", "COR3 FGM", "ATB3 FGA", "ATB3 FGM",
+			# NEW COLS ADDED TO KEEP:
+			"FTR", "AST/TO", "Plays", "eFG%", "TS%", "Pts/Play"
 		]
 		
 		valid_cols = [c for c in cols_to_keep if c in df_players.columns]
@@ -816,8 +844,7 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
 	if not all_game_stats: return None
 	combined = pd.concat(all_game_stats, ignore_index=True)
 	
-	# around line 790
-	cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "AS", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP", "RIM FGA", "RIM FGM", "PAINT FGA", "PAINT FGM", "MR FGA", "MR FGM", "COR3 FGA", "COR3 FGM", "ATB3 FGA", "ATB3 FGM"]
+	cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "AS", "ORB", "DRB", "TOV", "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN", "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP", "RIM FGA", "RIM FGM", "PAINT FGA", "PAINT FGM", "MR FGA", "MR FGM", "COR3 FGA", "COR3 FGM", "ATB3 FGA", "ATB3 FGM", "Plays"]
 	
 	# Filter only those that exist
 	valid_cols = [c for c in cols_to_sum if c in combined.columns]
@@ -845,7 +872,10 @@ def load_aggregated_classic_individual_data(target_team, league, season, phase=N
 	h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
 	h2h_totals['TO%'] = h2h_totals.apply(lambda x: x.get('TOV',0) / (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) if (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) > 0 else 0, axis=1)
 	h2h_totals['FTR'] = h2h_totals.apply(lambda x: x.get('FTM',0) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
-	
+	# NEW ADDS:
+	h2h_totals['TS%'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / (2 * (x.get('FGA', 0) + 0.44 * x.get('FTA', 0))) if (x.get('FGA', 0) + 0.44 * x.get('FTA', 0)) > 0 else 0, axis=1)
+	h2h_totals['Pts/Play'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / x.get('Plays', 1) if x.get('Plays', 0) > 0 else 0, axis=1)
+	h2h_totals['AST/TO'] = h2h_totals.apply(lambda x: x.get('AS', 0) / x.get('TOV', 1) if x.get('TOV', 0) > 0 else 0, axis=1)
 	# --- SYNERGY MATH ---
 	h2h_totals['USG%'] = h2h_totals.apply(lambda x: ((x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_FGA',1) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0))) if (x.get('MIN',0) > 0 and (x.get('Team_FGA',0) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0)) > 0) else 0, axis=1)
 	h2h_totals['OR%'] = h2h_totals.apply(lambda x: (x.get('ORB',0) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_ORB',1) + x.get('Opp_DRB',0))) if (x.get('MIN',0) > 0 and (x.get('Team_ORB',0) + x.get('Opp_DRB',0)) > 0) else 0, axis=1)
@@ -918,6 +948,10 @@ def load_h2h_classic_individual_data(target_team, opponent_team, league, season)
 	h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
 	h2h_totals['TO%'] = h2h_totals.apply(lambda x: x.get('TOV',0) / (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) if (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) > 0 else 0, axis=1)
 	h2h_totals['FTR'] = h2h_totals.apply(lambda x: x.get('FTM',0) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
+	# NEW ADDS:
+	h2h_totals['TS%'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / (2 * (x.get('FGA', 0) + 0.44 * x.get('FTA', 0))) if (x.get('FGA', 0) + 0.44 * x.get('FTA', 0)) > 0 else 0, axis=1)
+	h2h_totals['Pts/Play'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / x.get('Plays', 1) if x.get('Plays', 0) > 0 else 0, axis=1)
+	h2h_totals['AST/TO'] = h2h_totals.apply(lambda x: x.get('AS', 0) / x.get('TOV', 1) if x.get('TOV', 0) > 0 else 0, axis=1)
 	h2h_totals['Team_Name'] = target_team
 
 	return h2h_totals
@@ -958,7 +992,7 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     p_col = get_col('PLAYER') or 'Player'
 
     # Define metrics using the NEW formatted names
-    rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
+    rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TS%', 'TO%', 'OR%', 'FTR', 'AST/TO', 'Plays', 'Pts/Play', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     available_sorts = [s for s in rankable_metrics if get_col(s) is not None]
 
     # 2. SELECT SORTING
@@ -985,7 +1019,7 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     if get_col('GP'): cols_to_show.append(get_col('GP'))
     if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
 
-    classic_cols = ['PTS', 'USG%', 'eFG%', 'TO%', 'OR%', 'FTR', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
+    classic_cols = ['PTS', 'USG%', 'eFG%', 'TS%', 'TO%', 'OR%', 'FTR', 'AST/TO', 'Plays', 'Pts/Play', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     for c in classic_cols:
         actual_c = get_col(c)
         if actual_c and actual_c not in cols_to_show:
@@ -1012,14 +1046,35 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     # 5. FORMATTING MAP
     format_map = {'Pos': "{:.0f}"}
     for col in numeric_cols:
-        if '%' in col or col.upper() == 'FTR':
-            format_map[col] = "{:.1%}" if '%' in col else "{:.3f}"
-        elif col.upper() in [c.upper() for c in classic_cols]:
+        c_upper = col.upper().strip()
+        
+        # Percentages and standard ratios
+        if '%' in col or c_upper in ['FTR', 'AST/TO', 'TS%']:
+            if '%' in col:
+                format_map[col] = "{:.1%}"       # Displays as 55.4%
+            elif c_upper == 'AST/TO':
+                format_map[col] = "{:.2f}"       # Displays as 2.15
+            else:
+                format_map[col] = "{:.3f}"       # FTR displays as 0.250
+                
+        # Handle Plays and Pts/Play (ignoring header capitalization)
+        elif 'PLAY' in c_upper:
+            if 'PTS' in c_upper:
+                format_map[col] = "{:.2f}"       # Pts/Play displays as 1.12
+            else:
+                format_map[col] = "{:.1f}"       # Plays average displays as 8.4
+                
+        # Default Classic Columns
+        elif c_upper in [c.upper() for c in classic_cols]:
             format_map[col] = "{:.2f}"
+            
+        # RESTORED: Default fallback for Net Points (e.g. +1.45 or -0.80)
         else:
             format_map[col] = "{:+.2f}"
-    if get_col('GP') in df_final.columns: format_map[get_col('GP')] = "{:.0f}"
 
+    # Keep this override immediately after the loop to make GP a whole number
+    if get_col('GP') in df_final.columns: 
+        format_map[get_col('GP')] = "{:.0f}"
     # 6. INITIALIZE STYLER
     styler = df_final[cols_to_show].style.format(format_map)
     styler = styler.map(lambda x: 'color: transparent;' if x == 0 else '', subset=['Pos'])
@@ -2803,11 +2858,11 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				st.warning("No data found.")
 				return
 
-			tab_table, tab_radar = st.tabs(["Table", "Shot Radar"])
+			tab_table, tab_radar = st.tabs(["Impact Table", "Shot Radar"])
 
 			with tab_table:
 				display_player_table(df_table, f"{team_name} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
-
+				st.markdown("**Note:** Players with fewer games may have more volatile Net Points. Use the slider to filter by Games Played.")
 			with tab_radar:
 				try:
 					def deep_clean_name(name):
@@ -2942,8 +2997,13 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 					if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t1), load_single_game_classic_individual(game_record['path'], t1)
 					elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t1, t2, league, season), load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
 					else: d_t, d_z = load_individual_aggregate(t1, league, season, c_phase), load_aggregated_classic_individual_data(t1, league, season, c_phase)
-				else:
-					d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2) if mode == "Head to Head Matchup" else load_aggregated_classic_individual_data(t1, league, season, c_phase)
+				else: # 4-Factors Classic
+					if mode == "Games Boxscores":
+						d_t = load_single_game_classic_individual(game_record['path'], t1)
+					elif mode == "Head to Head Matchup":
+						d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
+					else:
+						d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
 					d_z = d_t
 				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t1, "t1_h2h")
 				
@@ -2952,16 +3012,24 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 					if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t2), load_single_game_classic_individual(game_record['path'], t2)
 					elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t2, t1, league, season), load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
 					else: d_t, d_z = load_individual_aggregate(t2, league, season, c_phase), load_aggregated_classic_individual_data(t2, league, season, c_phase)
-				else:
-					d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1) if mode == "Head to Head Matchup" else load_aggregated_classic_individual_data(t2, league, season, c_phase)
+				else: # 4-Factors Classic
+					if mode == "Games Boxscores":
+						d_t = load_single_game_classic_individual(game_record['path'], t2)
+					elif mode == "Head to Head Matchup":
+						d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
+					else:
+						d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase)
 					d_z = d_t
 				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t2, "t2_h2h")
 		else:
 			if analysis_type == "4-Factors Net Points":
 				if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t1), load_single_game_classic_individual(game_record['path'], t1)
 				else: d_t, d_z = load_individual_aggregate(t1, league, season, c_phase), load_aggregated_classic_individual_data(t1, league, season, c_phase)
-			else:
-				d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
+			else: # 4-Factors Classic
+				if mode == "Games Boxscores":
+					d_t = load_single_game_classic_individual(game_record['path'], t1)
+				else:
+					d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
 				d_z = d_t
 			render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t1, "t1_single")
 # --- GLOSSARY / INTERPRETATION ---
