@@ -2325,7 +2325,27 @@ elif mode == "Overall League Standings":
 				res[k] = res.get(k, 0) * mult
 			return res
 
-		if analysis_type == "4-Factors Classic ":
+		# SHOOTING SPLITS MATH HELPER
+		def calc_shooting_splits(data, lg_effic, lg_orb_pct):
+			f2m, f2a = clean_num(data.get('f2m', 0)), clean_num(data.get('f2a', 0))
+			f3m, f3a = clean_num(data.get('f3m', 0)), clean_num(data.get('f3a', 0))
+			
+			pts_2p = f2m * 2
+			fgx_2p = f2a - f2m
+			net_2p = pts_2p - (f2m * lg_effic) - ((1 - lg_orb_pct) * fgx_2p * lg_effic)
+			
+			pts_3p = f3m * 3
+			fgx_3p = f3a - f3m
+			net_3p = pts_3p - (f3m * lg_effic) - ((1 - lg_orb_pct) * fgx_3p * lg_effic)
+			
+			return {"2P": net_2p, "3P": net_3p}
+
+		# Conditionally show the Shooting Split checkbox
+		expand_shooting_standings = False
+		if analysis_type == "4-Factors Net Points":
+			expand_shooting_standings = st.checkbox("Show 2P/3P Shooting Split", value=False, key="standings_shoot_split_cb")
+			st.caption("Standardizes situational points to Per 100 Possessions.")
+		elif analysis_type == "4-Factors Classic ":
 			st.caption("**Note:** Situational points (Fast Break, 2nd Chance, TO-Pts) are standardized to **Per 100 Possessions** for fair league-wide ranking.")
 
 		league_results = []
@@ -2357,11 +2377,26 @@ elif mode == "Overall League Standings":
 					
 					disp = off_i if view_type == "Offensive Impact" else (def_i if view_type == "Defensive Impact" else net_i)
 					entry.update({
-						"Net Points": sum(disp.values()),"Shooting": disp['Shooting'], "Turnovers": disp['Turnovers'],
+						"Net Points": sum(disp.values()), "Shooting": disp['Shooting'], "Turnovers": disp['Turnovers'],
 						"Rebounding": disp['Rebounding'], "Free Throws": disp['Free Throws'] 
 					})
+
+					# Compute 2P/3P Net Splits
+					lg_splits = calc_shooting_splits(lg_data, lg_effic, lg_orb_pct)
+					t_off_splits = calc_shooting_splits(t_off, lg_effic, lg_orb_pct)
+					t_def_splits = calc_shooting_splits(t_def, lg_effic, lg_orb_pct)
+					
+					off_s = {k: (t_off_splits[k] - lg_splits[k]) for k in lg_splits}
+					def_s = {k: (lg_splits[k] - t_def_splits[k]) for k in lg_splits}
+					net_s = {k: off_s[k] + def_s[k] for k in lg_splits}
+					
+					disp_s = off_s if view_type == "Offensive Impact" else (def_s if view_type == "Defensive Impact" else net_s)
+					entry.update({
+						"2P": disp_s["2P"],
+						"3P": disp_s["3P"]
+					})
 				else:
-					# UPDATED CLASSIC LOGIC: Use the ADJ (Per 100) stats
+					# Use the ADJ (Per 100) stats
 					p_off = get_4f_percentages(t_off, t_def)
 					p_def = get_4f_percentages(t_def, t_off)
 					
@@ -2372,17 +2407,15 @@ elif mode == "Overall League Standings":
 						entry.update({"Pts off TO": t_def_adj['pts_off_to'], "2nd Chance": t_def_adj['pts_2nd_ch'], "Fast Break": t_def_adj['pts_fb']})
 						p_def_labeled = {f"Opp {k}": v for k, v in p_def.items()}
 						entry.update(p_def_labeled)
-					else: # Net Impact View
+					else: # Net Impact
 						entry.update({
 							"Pts off TO": t_off_adj['pts_off_to'] - t_def_adj['pts_off_to'],
 							"2nd Chance": t_off_adj['pts_2nd_ch'] - t_def_adj['pts_2nd_ch'],
 							"Fast Break": t_off_adj['pts_fb'] - t_def_adj['pts_fb']
 						})
-						# Label delta metrics using the Greek Delta symbol (Δ)
+						# Label delta metrics using Greek Delta (Δ)
 						p_net = {f"Δ{k}": p_off[k] - p_def[k] for k in p_off}
 						entry.update(p_net)
-						# Append raw offensive metrics next to the deltas
-						entry.update(p_off)
 				league_results.append(entry)
 
 		if not league_results:
@@ -2392,10 +2425,13 @@ elif mode == "Overall League Standings":
 			
 			# --- 1. DYNAMIC SORT SELECTOR ---
 			if analysis_type == "4-Factors Net Points":
-				rank_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
+				if expand_shooting_standings:
+					rank_cols = ["Net Points", "Shooting", "2P", "3P", "Turnovers", "Rebounding", "Free Throws"]
+				else:
+					rank_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
 			else:
 				if view_type == "Net Impact":
-					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR"]
 				elif view_type == "Offensive Impact":
 					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
 				else:
@@ -2425,18 +2461,22 @@ elif mode == "Overall League Standings":
 
 			# --- 3. DEFINE COLUMNS AND FORMATTING ---
 			if analysis_type == "4-Factors Net Points":
-				cols_visible = ["Pos", "Team_Logo", "Team", "Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
-				format_dict = {k: "{:+.2f}" for k in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]}
-				grad_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
+				if expand_shooting_standings:
+					cols_visible = ["Pos", "Team_Logo", "Team", "Net Points", "Shooting", "2P", "3P", "Turnovers", "Rebounding", "Free Throws"]
+					format_dict = {k: "{:+.2f}" for k in ["Net Points", "Shooting", "2P", "3P", "Turnovers", "Rebounding", "Free Throws"]}
+					grad_cols = ["Net Points", "Shooting", "2P", "3P", "Turnovers", "Rebounding", "Free Throws"]
+				else:
+					cols_visible = ["Pos", "Team_Logo", "Team", "Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
+					format_dict = {k: "{:+.2f}" for k in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]}
+					grad_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
 			else:
 				if view_type == "Net Impact":
-					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR"]
 					format_dict = {
 						"Pts off TO": "{:+.2f}", "2nd Chance": "{:+.2f}", "Fast Break": "{:+.2f}",
-						"ΔeFG%": "{:+.1%}", "ΔTO%": "{:+.1%}", "ΔORB%": "{:+.1%}", "ΔFTR": "{:+.3f}",
-						"eFG%": "{:.1%}", "TO%": "{:.1%}", "ORB%": "{:.1%}", "FTR": "{:.3f}"
+						"ΔeFG%": "{:+.1%}", "ΔTO%": "{:+.1%}", "ΔORB%": "{:+.1%}", "ΔFTR": "{:+.3f}"
 					}
-					grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+					grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR"]
 				elif view_type == "Offensive Impact":
 					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
 					format_dict = {
@@ -2460,7 +2500,7 @@ elif mode == "Overall League Standings":
 			for col in grad_cols:
 				if col == chosen_team_rank:
 					# Is it a delta/margin column?
-					is_delta = col.startswith("Δ") or col in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Pts off TO", "2nd Chance", "Fast Break"]
+					is_delta = col.startswith("Δ") or col in ["Net Points", "Shooting", "2P", "3P", "Turnovers", "Rebounding", "Free Throws", "Pts off TO", "2nd Chance", "Fast Break"]
 					
 					if is_delta:
 						v_max = standings_df[col].abs().max()
@@ -2493,7 +2533,6 @@ elif mode == "Overall League Standings":
 				column_order=cols_visible,
 				column_config=col_config_standings
 			)
-
 # --- THE PLAYER TAB LOGIC ---
 	# --- THE PLAYER TAB LOGIC ---
 	with tab_standings_players:
@@ -2522,7 +2561,7 @@ elif mode == "Overall League Standings":
 			if df_league_players is not None and not df_league_players.empty:
 				df_league_players = df_league_players[df_league_players['Team_Name'].isin(teams_to_analyze)]
 				
-				# --- NEW: APPLY THE GP FILTER DIRECTLY ---
+				# --- APPLY THE GP FILTER DIRECTLY ---
 				gp_col = next((c for c in df_league_players.columns if c.upper() == 'GP'), 'GP')
 				if gp_col in df_league_players.columns:
 					# Ensure numeric comparison
@@ -2532,25 +2571,24 @@ elif mode == "Overall League Standings":
 			if df_league_players is None or df_league_players.empty:
 				st.warning(f"No individual player data found with at least {min_gp_ld} games played.")
 			else:
-				# Sorting logic
+				# --- CLEAN DECOUPLED SORT & TITLE LOGIC ---
 				if analysis_type == "4-Factors Net Points":
-					if view_type == "Offensive Impact":
-						sort_col, title_prefix = 'Off_NP', "Top 100 Offensive"
-					elif view_type == "Defensive Impact":
-						sort_col, title_prefix = 'Def_NP', "Top 100 Defensive"
-					else:
-						sort_col, title_prefix = 'Total_NP', "Top 100 Overall"
+					sort_col = 'Total_NP'
+					title_prefix = "Player Leaderboard - Net Points"
 				else:
-					sort_col, title_prefix = 'PTS', "Top 100 Classic"
+					sort_col = 'PTS'
+					title_prefix = "Player Leaderboard - Classic Stats"
 
-				# Safe fallback if column is missing
+				# Safe fallback if the column is missing in the data
 				if sort_col not in df_league_players.columns:
 					numeric_cols = df_league_players.select_dtypes(include=['number']).columns
 					sort_col = numeric_cols[0] if not numeric_cols.empty else df_league_players.columns[0]
 
+				# Perform the stable sort
 				df_leaderboard = df_league_players.sort_values(sort_col, ascending=False)
 				
-				st.markdown(f"### {title_prefix} Impact ({selected_phase})")
+				# Clean fixed title display
+				st.markdown(f"### {title_prefix} ({selected_phase})")
 				
 				# Render the table
 				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)
