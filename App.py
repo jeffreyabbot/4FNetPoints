@@ -3245,5 +3245,6 @@ st.html(
         // 3. Standard background safety net loop
         setInterval(lockAllInputs, 300);
     </script>
-    """
+    """,
+    unsafe_allow_javascript=True  # <--- CRITICAL FIX: Tells Streamlit to execute the script tag
 )
