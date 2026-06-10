@@ -228,10 +228,6 @@ def inject_print_engine():
 					print-color-adjust: exact !important;
 					color-adjust: exact !important;
 				}
-				/* Prevent the search box from focusing/triggering keyboard on mobile */
-				[data-baseweb="select"] input {
-					pointer-events: none !important;
-				}
 			}
 		</style>
 		""",
@@ -1684,6 +1680,13 @@ st.markdown("""
 			background-color: #2d324a !important;
 			border: 1px solid #3f445e !important;
 		}
+		/* PHASE 13: PREVENT MOBILE KEYBOARD ON DROPDOWNS */
+		/* Disables touch-focus on the internal search box input. 
+		   This allows the dropdown container to open cleanly on mobile 
+		   without triggering the device's virtual keyboard. */
+		div[data-baseweb="select"] input {
+			pointer-events: none !important;
+		}
 		
 		/* The clickable header part */
 		[data-testid="stSidebar"] [data-testid="stExpander"] summary {
@@ -1759,15 +1762,22 @@ if mode == "Home":
     ingame_logo_path = os.path.join(LOGOS_PATH, "InGame.png")
     logo_base64 = ""
     if os.path.exists(ingame_logo_path):
-        with open(ingame_logo_path, "rb") as f:
-            logo_base64 = base64.b64encode(f.read()).decode()
+        try:
+            with open(ingame_logo_path, "rb") as f:
+                logo_base64 = base64.b64encode(f.read()).decode()
+        except Exception:
+            pass
 
-    # 2. Build the string (keep your existing logo logic)
+    # 2. Build the horizontally-aligned HTML structure
+    logo_html = f'<img src="data:image/png;base64,{logo_base64}" width="70" style="margin-right: 18px; object-fit: contain;">' if logo_base64 else ''
+    
     html_content = f"""
-    <div style="text-align: center; padding: 40px 0px;">
-        {'<img src="data:image/png;base64,' + logo_base64 + '" width="80" style="margin-bottom: 20px;">' if logo_base64 else ''}
-        <h1 style="font-size: 3.5rem; margin-bottom: 10px;">Basketball 4-Factors Scouting</h1>
-        <p style="font-size: 1.2rem; color: #666;">Advanced Analytics & Situational Performance Tool</p>
+    <div style="text-align: center; padding: 15px 0px 25px 0px;">
+        <div style="display: inline-flex; align-items: center; justify-content: center; flex-wrap: wrap; margin-bottom: 5px;">
+            {logo_html}
+            <h1 style="font-size: 3.2rem; margin: 0; line-height: 1.1; font-weight: 700;">Basketball 4-Factors Scouting</h1>
+        </div>
+        <p style="font-size: 1.2rem; color: #666; margin: 10px 0 0 0;">Advanced Analytics & Situational Performance Tool</p>
     </div>
     """
 
@@ -2337,7 +2347,6 @@ elif mode == "Overall League Standings":
 				entry = {"Team_Logo": get_team_icon(team, league), "Team": team}
 
 				if analysis_type == "4-Factors Net Points":
-					# (Keep your existing Net Points logic exactly as it is...)
 					lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
 					t_off_raw = calc_raw_factors(t_off, t_def['drb'], lg_effic, lg_orb_pct)
 					t_def_raw = calc_raw_factors(t_def, t_off['drb'], lg_effic, lg_orb_pct)
@@ -2361,15 +2370,19 @@ elif mode == "Overall League Standings":
 						entry.update(p_off)
 					elif view_type == "Defensive Impact":
 						entry.update({"Pts off TO": t_def_adj['pts_off_to'], "2nd Chance": t_def_adj['pts_2nd_ch'], "Fast Break": t_def_adj['pts_fb']})
-						entry.update(p_def)
-					else:
+						p_def_labeled = {f"Opp {k}": v for k, v in p_def.items()}
+						entry.update(p_def_labeled)
+					else: # Net Impact View
 						entry.update({
 							"Pts off TO": t_off_adj['pts_off_to'] - t_def_adj['pts_off_to'],
 							"2nd Chance": t_off_adj['pts_2nd_ch'] - t_def_adj['pts_2nd_ch'],
 							"Fast Break": t_off_adj['pts_fb'] - t_def_adj['pts_fb']
 						})
-						p_net = {k: p_off[k] - p_def[k] for k in p_off}
+						# Label delta metrics using the Greek Delta symbol (Δ)
+						p_net = {f"Δ{k}": p_off[k] - p_def[k] for k in p_off}
 						entry.update(p_net)
+						# Append raw offensive metrics next to the deltas
+						entry.update(p_off)
 				league_results.append(entry)
 
 		if not league_results:
@@ -2381,10 +2394,13 @@ elif mode == "Overall League Standings":
 			if analysis_type == "4-Factors Net Points":
 				rank_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
 			else:
-				# Matches the keys used in entry.update
-				rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+				if view_type == "Net Impact":
+					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+				elif view_type == "Offensive Impact":
+					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+				else:
+					rank_cols = ["Pts off TO", "2nd Chance", "Fast Break", "Opp eFG%", "Opp TO%", "Opp ORB%", "Opp FTR"]
 			
-			# Ensure we only show metrics that actually exist in our data
 			available_ranks = [c for c in rank_cols if c in standings_df.columns]
 			
 			rank_c1, rank_c2 = st.columns([1, 3])
@@ -2392,18 +2408,17 @@ elif mode == "Overall League Standings":
 				chosen_team_rank = st.selectbox("Rank Teams By:", available_ranks, key="team_rank_sel")
 			
 			# --- 2. INTELLIGENT SORTING ---
-			# For scouting: Higher is usually better, EXCEPT for Turnovers (Offensive) 
-			# and Points Allowed (Defensive).
 			is_ascending = False
-			if chosen_team_rank == "TO%" and view_type == "Offensive Impact":
-				is_ascending = True # Best team has the LOWEST turnover rate
-			if view_type == "Defensive Impact" and "Pts" in chosen_team_rank:
-				is_ascending = True # Best defense allows the LOWEST points
+			# Lower turnovers or lower TO deltas (more negative) rank highest
+			if chosen_team_rank in ["TO%", "ΔTO%"] and view_type in ["Offensive Impact", "Net Impact"]:
+				is_ascending = True 
+			# Defensive allows: lower opponent values rank highest
+			if view_type == "Defensive Impact" and any(x in chosen_team_rank for x in ["Pts", "Opp eFG%", "Opp FTR"]):
+				is_ascending = True
 
 			# Perform the sort
 			standings_df = standings_df.sort_values(by=chosen_team_rank, ascending=is_ascending).copy()
 			
-			# Reset the Position column based on the new sort
 			if "Pos" in standings_df.columns:
 				standings_df = standings_df.drop(columns=["Pos"])
 			standings_df.insert(0, "Pos", range(1, len(standings_df) + 1))
@@ -2414,16 +2429,28 @@ elif mode == "Overall League Standings":
 				format_dict = {k: "{:+.2f}" for k in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]}
 				grad_cols = ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws"]
 			else:
-				cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
 				if view_type == "Net Impact":
-					format_dict = {k: "{:+.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
-					format_dict.update({k: "{:+.1%}" for k in ["eFG%", "TO%", "ORB%"]})
-					format_dict["FTR"] = "{:+.3f}"
+					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+					format_dict = {
+						"Pts off TO": "{:+.2f}", "2nd Chance": "{:+.2f}", "Fast Break": "{:+.2f}",
+						"ΔeFG%": "{:+.1%}", "ΔTO%": "{:+.1%}", "ΔORB%": "{:+.1%}", "ΔFTR": "{:+.3f}",
+						"eFG%": "{:.1%}", "TO%": "{:.1%}", "ORB%": "{:.1%}", "FTR": "{:.3f}"
+					}
+					grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "ΔeFG%", "ΔTO%", "ΔORB%", "ΔFTR", "eFG%", "TO%", "ORB%", "FTR"]
+				elif view_type == "Offensive Impact":
+					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
+					format_dict = {
+						"Pts off TO": "{:.2f}", "2nd Chance": "{:.2f}", "Fast Break": "{:.2f}",
+						"eFG%": "{:.1%}", "TO%": "{:.1%}", "ORB%": "{:.1%}", "FTR": "{:.3f}"
+					}
+					grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "eFG%", "TO%", "ORB%", "FTR"]
 				else:
-					format_dict = {k: "{:.2f}" for k in ["Pts off TO", "2nd Chance", "Fast Break"]}
-					format_dict.update({k: "{:.1%}" for k in ["eFG%", "TO%", "ORB%"]})
-					format_dict["FTR"] = "{:.3f}"
-				grad_cols = [c for c in cols_visible if c not in ["Pos", "Team_Logo", "Team"]]
+					cols_visible = ["Pos", "Team_Logo", "Team", "Pts off TO", "2nd Chance", "Fast Break", "Opp eFG%", "Opp TO%", "Opp ORB%", "Opp FTR"]
+					format_dict = {
+						"Pts off TO": "{:.2f}", "2nd Chance": "{:.2f}", "Fast Break": "{:.2f}",
+						"Opp eFG%": "{:.1%}", "Opp TO%": "{:.1%}", "Opp ORB%": "{:.1%}", "Opp FTR": "{:.3f}"
+					}
+					grad_cols = ["Pts off TO", "2nd Chance", "Fast Break", "Opp eFG%", "Opp TO%", "Opp ORB%", "Opp FTR"]
 
 			format_dict["Pos"] = "{:.0f}"
 
@@ -2431,24 +2458,19 @@ elif mode == "Overall League Standings":
 			styler = standings_df[cols_visible].style.format(format_dict)
 
 			for col in grad_cols:
-				# DYNAMIC FOCUS: Only color the column the user selected to Rank by
 				if col == chosen_team_rank:
-					if analysis_type == "4-Factors Net Points" or view_type == "Net Impact":
+					# Is it a delta/margin column?
+					is_delta = col.startswith("Δ") or col in ["Net Points", "Shooting", "Turnovers", "Rebounding", "Free Throws", "Pts off TO", "2nd Chance", "Fast Break"]
+					
+					if is_delta:
 						v_max = standings_df[col].abs().max()
-						v_max = max(v_max, 1.0)
+						v_max = max(v_max, 0.01)
 						vmin, vmax = -v_max, v_max
-						cmap = custom_redblue if "TO%" in col else custom_bluered
+						cmap = custom_redblue if col in ["TO%", "ΔTO%"] else custom_bluered
 					else:
-						# Volume logic for Offensive/Defensive ranks
+						# Raw columns get standard positive range boundaries
 						vmin, vmax = standings_df[col].min(), standings_df[col].max()
-						if view_type == "Offensive Impact":
-							cmap = custom_redblue if "TO%" in col else custom_bluered
-						else:
-							# Defensive: Low points allowed = Red (Hot Defense)
-							if any(x in col for x in ["TO%", "ORB%"]):
-								cmap = custom_bluered 
-							else:
-								cmap = custom_redblue 
+						cmap = custom_redblue if col in ["TO%", "Opp TO%"] else custom_bluered
 					
 					styler = styler.background_gradient(cmap=cmap, subset=[col], vmin=vmin, vmax=vmax)
 
