@@ -3208,3 +3208,30 @@ with col_p2:
 		height=70,
 	)
 	st.caption("<div style='text-align:center;'>Tip: Ensure 'Background Graphics' is ON in print settings to keep heatmap colors.</div>", unsafe_allow_html=True)
+	# --- MOBILE KEYBOARD SUPPRESSION ENGINE ---
+# This script runs directly in the main browser window. It continuously scans 
+# the DOM for selectbox inputs with 10+ options and applies HTML attributes 
+# that instruct mobile browsers to suppress the virtual keyboard entirely.
+st.html(
+    """
+    <script>
+        const suppressDropdownKeyboards = () => {
+            const inputs = document.querySelectorAll('div[data-baseweb="select"] input');
+            inputs.forEach(input => {
+                if (input.getAttribute('inputmode') !== 'none') {
+                    // Instructs mobile browsers not to raise the virtual keyboard
+                    input.setAttribute('inputmode', 'none');
+                    // Backup layer: Marks the search input field as read-only on mobile
+                    input.setAttribute('readonly', 'true');
+                    // Hides the text typing cursor
+                    input.style.caretColor = 'transparent';
+                }
+            });
+        };
+        
+        // Execute immediately and poll every 500ms to cover dynamically rendered widgets
+        suppressDropdownKeyboards();
+        setInterval(suppressDropdownKeyboards, 500);
+    </script>
+    """
+)
