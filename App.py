@@ -3226,10 +3226,10 @@ with col_p2:
 	)
 	st.caption("<div style='text-align:center;'>Tip: Ensure 'Background Graphics' is ON in print settings to keep heatmap colors.</div>", unsafe_allow_html=True)
 # --- MOBILE KEYBOARD SUPPRESSION ENGINE ---
-# Captures touch, click, and focus events synchronously at the document level. 
+# Captures touch, click, and focus events synchronously on the parent document. 
 # This intercepts React's programmatic focus pipeline instantly before the browser 
-# can raise the virtual keyboard.
-st.markdown(
+# can raise the virtual keyboard on mobile screens.
+st.components.v1.html(
     """
     <script>
         const lockInput = (input) => {
@@ -3244,24 +3244,29 @@ st.markdown(
         };
 
         const lockAllInputs = () => {
-            const inputs = document.querySelectorAll('div[data-baseweb="select"] input');
+            const parentDoc = window.parent.document;
+            const inputs = parentDoc.querySelectorAll('div[data-baseweb="select"] input');
             inputs.forEach(lockInput);
         };
 
-        // 1. Intercept touch/mouse interactions synchronously before React processes them
-        document.addEventListener('touchstart', lockAllInputs, { passive: true });
-        document.addEventListener('mousedown', lockAllInputs, { passive: true });
+        // Access the main Streamlit page document outside this component's iframe
+        const parentDoc = window.parent.document;
 
-        // 2. Intercept programmatic focus synchronously in the capture phase
-        document.addEventListener('focusin', function(e) {
+        // 1. Intercept touch/mouse interactions on parent synchronously before React processes them
+        parentDoc.addEventListener('touchstart', lockAllInputs, { passive: true });
+        parentDoc.addEventListener('mousedown', lockAllInputs, { passive: true });
+
+        // 2. Intercept programmatic focus on parent synchronously in the capture phase
+        parentDoc.addEventListener('focusin', function(e) {
             if (e.target && e.target.tagName === 'INPUT' && e.target.closest('div[data-baseweb="select"]')) {
                 lockInput(e.target);
             }
         }, true);
 
-        // 3. Standard background safety net loop
+        // 3. Background loop to handle newly rendered select components
         setInterval(lockAllInputs, 300);
     </script>
     """,
-    unsafe_allow_html=True  # Safely processes the <script> block on this Streamlit version
+    height=0,
+    width=0
 )
