@@ -125,17 +125,24 @@ def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sa
 			ftr_elite = 0.50
 			sit_elite, sit_poor = 3.0, 0.5
 
-		# 1. Net Points Thresholds
+		# 1. DEF_NP Special Check (Narrower margins due to team-effort constraints)
+		if 'DEF_NP' in c_norm:
+			def_elite = 0.50 if is_large_sample else 1.00
+			def_poor = -0.50 if is_large_sample else -1.00
+			if v >= def_elite: return 'color: #e06666; font-weight: bold;'
+			if v <= def_poor: return 'color: #6fa8dc; font-weight: bold;'
+
+		# 2. General Net Points Thresholds (Bypassed if DEF_NP is caught above)
 		if any(x in c_norm for x in ['NET_', 'TOTAL_NP', 'OFF_', 'DEF_']):
 			if v >= np_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= np_poor: return 'color: #6fa8dc; font-weight: bold;'
 		
-		# 2. USG% - Alpha Scorer vs Role Player
+		# 3. USG% - Alpha Scorer vs Role Player
 		if 'USG' in c_norm:
 			if v >= usg_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= usg_poor: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 3. Shooting Efficiency: eFG% & TS%
+		# 4. Shooting Efficiency: eFG% & TS%
 		if 'EFG' in c_norm:
 			ref = globals().get('avg_efg', 0.52)
 			if v >= ref + efg_margin: return 'color: #e06666; font-weight: bold;'
@@ -146,33 +153,33 @@ def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sa
 			if v >= ref + efg_margin: return 'color: #e06666; font-weight: bold;'
 			if v <= ref - efg_margin: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 4. TO% - Ball Security (Lower is better)
+		# 5. TO% - Ball Security (Lower is better)
 		if 'TO%' in c_norm or 'TOV%' in c_norm:
 			ref = globals().get('avg_to', 0.16)
 			if v <= ref - to_margin: return 'color: #e06666; font-weight: bold;'
 			if v >= ref + to_margin: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 5. OR% - Rebounding Skill
+		# 6. OR% - Rebounding Skill
 		if 'OR%' in c_norm or 'ORB%' in c_norm:
 			if v >= or_elite: return 'color: #e06666; font-weight: bold;'
 
-		# 6. FTR - Foul Drawing
+		# 7. FTR - Foul Drawing
 		if 'FTR' in c_norm:
 			if v >= ftr_elite: return 'color: #e06666; font-weight: bold;'
 
-		# 7. AST/TO Ratio (Ball Security / Distribution)
+		# 8. AST/TO Ratio (Ball Security / Distribution)
 		if 'AST/TO' in c_norm:
 			ast_to_elite = 2.5 if is_large_sample else 3.0
 			ast_to_poor = 0.8 if is_large_sample else 0.5
 			if v >= ast_to_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= ast_to_poor: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 8. Points per Play
+		# 9. Points per Play
 		if 'PLAY' in c_norm and 'PTS' in c_norm:
 			if v >= 1.20: return 'color: #e06666; font-weight: bold;'
 			if v <= 0.85: return 'color: #6fa8dc; font-weight: bold;'
 
-		# 9. Situational Volumes (Per Game or Per 100)
+		# 10. Situational Volumes (Per Game or Per 100)
 		if any(x in c_norm for x in ['PTS_OFF_TO', 'PTSS_OFF_TO', '2ND_CHANCE', 'FAST_BREAK']):
 			if v >= sit_elite: return 'color: #e06666; font-weight: bold;'
 			if v <= sit_poor: return 'color: #6fa8dc; font-weight: bold;'
@@ -976,7 +983,8 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     def format_header(col):
         parts = [p.capitalize() for p in col.split('_')]
         new_name = "_".join(parts)
-        return new_name.replace('Pt', 'PT').replace('Ft', 'FT').replace('Tp', 'TP').replace('Tov', 'TOV')
+        # Added .replace('Np', 'NP') to format Off_NP and Def_NP properly
+        return new_name.replace('Pt', 'PT').replace('Ft', 'FT').replace('Tp', 'TP').replace('Tov', 'TOV').replace('Np', 'NP')
 
     df = df.rename(columns=format_header)
 
@@ -987,8 +995,8 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     # Force p_col to be defined for the whole function
     p_col = get_col('PLAYER') or 'Player'
 
-    # Define metrics using the NEW formatted names
-    rankable_metrics = ['Total_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TS%', 'TO%', 'OR%', 'FTR', 'AST/TO', 'Plays', 'Pts/Play', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
+    # Define metrics using the NEW formatted names (with Off_NP and Def_NP added for sorting)
+    rankable_metrics = ['Total_NP', 'Off_NP', 'Def_NP', 'Net_Shooting', 'Net_TOV', 'Net_ORB', 'Net_FT', 'PTS', 'USG%', 'eFG%', 'TS%', 'TO%', 'OR%', 'FTR', 'AST/TO', 'Plays', 'Pts/Play', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     available_sorts = [s for s in rankable_metrics if get_col(s) is not None]
 
     # 2. SELECT SORTING
@@ -1014,6 +1022,10 @@ def display_player_table(df, title, show_off_def=False, show_shooting=False, is_
     if get_col('Team_Name'): cols_to_show.append(get_col('Team_Name'))
     if get_col('GP'): cols_to_show.append(get_col('GP'))
     if get_col('Total_NP'): cols_to_show.append(get_col('Total_NP'))
+
+    # Added Off_NP and Def_NP to display right after Total_NP
+    if get_col('Off_NP'): cols_to_show.append(get_col('Off_NP'))
+    if get_col('Def_NP'): cols_to_show.append(get_col('Def_NP'))
 
     classic_cols = ['PTS', 'USG%', 'eFG%', 'TS%', 'TO%', 'OR%', 'FTR', 'AST/TO', 'Plays', 'Pts/Play', 'Pts_off_TO', '2nd_Chance', 'Fast_Break']
     for c in classic_cols:
@@ -2207,88 +2219,93 @@ elif mode == "Team Performance by Game":
 
 						else:
 							player_df = pd.DataFrame(player_perf_data)
-							p_cols = ["Round", "Opp_Logo", "Matchup"]
 							
-							if analysis_type == "4-Factors Net Points":
-								prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
-								
-								# 1. Determine the primary Net Points metric based on selected view
-								main_np_col = "Total_NP" if player_view_type == "Net Impact" else f"{prefix}NP"
-								p_numeric = []
-								
-								if main_np_col in player_df.columns:
-									p_numeric.append(main_np_col)
-								
-								# 2. Gather factor metrics
-								for f in ["Shooting", "TOV", "ORB", "FT"]:
-									col_name = f"{prefix}{f}"
-									if col_name in player_df.columns:
-										p_numeric.append(col_name)
-								
-								exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
-								exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
-
-								if exp_off:
-									# Add Off_NP and Def_NP if Off/Def breakdown is expanded
-									for np_col in ["Off_NP", "Def_NP"]:
-										if np_col in player_df.columns and np_col not in p_numeric:
-											p_numeric.append(np_col)
-											
-									for f in ["Shooting", "TOV", "ORB", "FT"]:
-										if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
-										if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
-										
-								if exp_shoot:
-									for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
-										if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
-										
+							# --- CRITICAL FIX: Wrap styling and slicing in a safety check ---
+							if player_df.empty:
+								st.warning(f"No game data recorded for {selected_player} within the selected round range or filter combinations.")
 							else:
-								# This handles the classic metrics when "4-Factors Classic" is active
-								p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
-								exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
-								if exp_shoot:
-									for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
-										if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
-							
-							p_cols += [c for c in p_numeric if c in player_df.columns]
-							
-							# --- DYNAMIC FOCUS FOR PLAYER TRENDS ---
-							focus_col, _ = st.columns([1, 3])
-							with focus_col:
-								p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
+								p_cols = ["Round", "Opp_Logo", "Matchup"]
+								
+								if analysis_type == "4-Factors Net Points":
+									prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
+									
+									# 1. Determine the primary Net Points metric based on selected view
+									main_np_col = "Total_NP" if player_view_type == "Net Impact" else f"{prefix}NP"
+									p_numeric = []
+									
+									if main_np_col in player_df.columns:
+										p_numeric.append(main_np_col)
+									
+									# 2. Gather factor metrics
+									for f in ["Shooting", "TOV", "ORB", "FT"]:
+										col_name = f"{prefix}{f}"
+										if col_name in player_df.columns:
+											p_numeric.append(col_name)
+									
+									exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
+									exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
 
-							def get_col_format(col_name):
-								if '%' in col_name: return "{:.1%}"
-								if col_name == 'FTR': return "{:.3f}"
-								if col_name in ['F2M', 'F2A', 'F3M', 'F3A']: return "{:.0f}"
-								if analysis_type == "4-Factors Classic ": return "{:.2f}"
-								return "{:+.2f}"
+									if exp_off:
+										# Add Off_NP and Def_NP if Off/Def breakdown is expanded
+										for np_col in ["Off_NP", "Def_NP"]:
+											if np_col in player_df.columns and np_col not in p_numeric:
+												p_numeric.append(np_col)
+												
+										for f in ["Shooting", "TOV", "ORB", "FT"]:
+											if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
+											if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
+											
+									if exp_shoot:
+										for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
+											if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+											
+								else:
+									# This handles the classic metrics when "4-Factors Classic" is active
+									p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
+									exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+									if exp_shoot:
+										for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
+											if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+								
+								p_cols += [c for c in p_numeric if c in player_df.columns]
+								
+								# --- DYNAMIC FOCUS FOR PLAYER TRENDS ---
+								focus_col, _ = st.columns([1, 3])
+								with focus_col:
+									p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
 
-							p_format = {k: get_col_format(k) for k in p_numeric}
-							styler_p = player_df[p_cols].style.format(p_format)
-							
-							# --- APPLY STYLING (Outliers + Thermal Focus) ---
-							for col in [c for c in p_numeric if c in player_df.columns]:
-								# 1. Apply the "Scout's Eye" Bold Text Highlighting (Force single-game logic)
-								styler_p = styler_p.map(
-									lambda x, c=col: highlight_scouting_outliers(x, c, p_focus, is_large_sample=False), 
-									subset=[col]
-								)
+								def get_col_format(col_name):
+									if '%' in col_name: return "{:.1%}"
+									if col_name == 'FTR': return "{:.3f}"
+									if col_name in ['F2M', 'F2A', 'F3M', 'F3A']: return "{:.0f}"
+									if analysis_type == "4-Factors Classic ": return "{:.2f}"
+									return "{:+.2f}"
 
-								# 2. Apply the Thermal Background to the focused column
-								if col == p_focus:
-									if player_df[col].min() != player_df[col].max():
-										if 'TO%' in col: cmap = custom_redblue
-										elif any(x in col for x in ['PTS', 'USG%', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
-											cmap = custom_wred
-										else: cmap = custom_bluered
-										
-										styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
+								p_format = {k: get_col_format(k) for k in p_numeric}
+								styler_p = player_df[p_cols].style.format(p_format)
+								
+								# --- APPLY STYLING (Outliers + Thermal Focus) ---
+								for col in [c for c in p_numeric if c in player_df.columns]:
+									# 1. Apply the "Scout's Eye" Bold Text Highlighting (Force single-game logic)
+									styler_p = styler_p.map(
+										lambda x, c=col: highlight_scouting_outliers(x, c, p_focus, is_large_sample=False), 
+										subset=[col]
+									)
 
-							dynamic_height_p = (len(player_df) * 36) + 45
-							col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
-							for c in p_numeric: col_config_p[c] = st.column_config.NumberColumn(c, width="small")
-							st.dataframe(styler_p, use_container_width=False, hide_index=True, height=dynamic_height_p, column_config=col_config_p)
+									# 2. Apply the Thermal Background to the focused column
+									if col == p_focus:
+										if player_df[col].min() != player_df[col].max():
+											if 'TO%' in col: cmap = custom_redblue
+											elif any(x in col for x in ['PTS', 'USG%', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
+												cmap = custom_wred
+											else: cmap = custom_bluered
+											
+											styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
+
+								dynamic_height_p = (len(player_df) * 36) + 45
+								col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
+								for c in p_numeric: col_config_p[c] = st.column_config.NumberColumn(c, width="small")
+								st.dataframe(styler_p, use_container_width=False, hide_index=True, height=dynamic_height_p, column_config=col_config_p)
 
 elif mode == "Overall League Standings":
 	# 1. Phase Selection
@@ -3212,7 +3229,7 @@ with col_p2:
 # Captures touch, click, and focus events synchronously at the document level. 
 # This intercepts React's programmatic focus pipeline instantly before the browser 
 # can raise the virtual keyboard.
-st.html(
+st.markdown(
     """
     <script>
         const lockInput = (input) => {
@@ -3246,5 +3263,5 @@ st.html(
         setInterval(lockAllInputs, 300);
     </script>
     """,
-    unsafe_allow_javascript=True  # <--- CRITICAL FIX: Tells Streamlit to execute the script tag
+    unsafe_allow_html=True  # Safely processes the <script> block on this Streamlit version
 )
