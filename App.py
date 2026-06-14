@@ -1210,9 +1210,21 @@ def build_game_index():
 						match = re.search(r'(\d+)', filename)
 						if match:
 							game_id = int(match.group(1))
-							group_part = filename.split(str(game_id))[-1].replace(".xlsx", "").strip("_")
-							group_part = group_part.replace("LIGAREGULAR", "")
-							group_name = group_part if group_part else "Main"
+							
+							# --- UNIFY POSTSEASON PHASES & GROUPS (ONLY FOR ACB AND EUROLEAGUE) ---
+							# This prevents seen_counts from resetting across separate folders, 
+							# but is explicitly restricted to keep FEB and other leagues completely untouched.
+							phase_lower = phase.lower()
+							is_post = any(x in phase_lower for x in ["playoff", "post", "final", "f4", "semifinal", "cuartos"])
+							
+							if is_post and league in ["ACB", "Euroleague"]:
+								phase_unified = "Playoffs"
+								group_name = "Main"
+							else:
+								phase_unified = phase
+								group_part = filename.split(str(game_id))[-1].replace(".xlsx", "").strip("_")
+								group_part = group_part.replace("LIGAREGULAR", "")
+								group_name = group_part if group_part else "Main"
 							
 							file_path = os.path.join(root, filename)
 							try:
@@ -1221,7 +1233,7 @@ def build_game_index():
 								t2_raw = str(df_names.iloc[2, 0]).strip()
 								
 								raw_data.append({
-									"league": league, "season": season, "phase_orig": phase,
+									"league": league, "season": season, "phase_orig": phase_unified,
 									"group": group_name, "game_id": game_id, 
 									"t1": t1_raw, "t2": t2_raw, "path": file_path
 								})
@@ -1242,12 +1254,107 @@ def build_game_index():
 		if is_postseason:
 			df_group = df_group.copy().sort_values('game_id')
 			df_group['matchup'] = df_group.apply(lambda x: "-".join(sorted([x['t1'], x['t2']])), axis=1)
-			seen_counts = {}
-			for _, row in df_group.iterrows():
-				m_key = row['matchup']
-				seen_counts[m_key] = seen_counts.get(m_key, 0) + 1
-				round_label = f"Playoffs G{seen_counts[m_key]}"
-				final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
+			
+			if lg == "ACB":
+				# --- ACB Playoffs Classification (Quarterfinals -> Semifinals -> Finals) ---
+				matchup_earliest_id = {}
+				for _, row in df_group.iterrows():
+					m_key = row['matchup']
+					if m_key not in matchup_earliest_id:
+						matchup_earliest_id[m_key] = row['game_id']
+						
+				sorted_matchups = sorted(matchup_earliest_id.keys(), key=lambda k: matchup_earliest_id[k])
+				
+				matchup_round_name = {}
+				for idx, m_key in enumerate(sorted_matchups):
+					if idx < 4:
+						matchup_round_name[m_key] = "Quarterfinals"
+					elif idx < 6:
+						matchup_round_name[m_key] = "Semifinals"
+					else:
+						matchup_round_name[m_key] = "Finals"
+						
+				seen_counts = {}
+				for _, row in df_group.iterrows():
+					m_key = row['matchup']
+					seen_counts[m_key] = seen_counts.get(m_key, 0) + 1
+					stage_name = matchup_round_name.get(m_key, "Playoffs")
+					round_label = f"{stage_name} G{seen_counts[m_key]}"
+					final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
+					
+			elif lg == "Euroleague":
+				# --- Euroleague Postseason Classification (Play-In -> Playoffs -> Final Four) ---
+				matchup_counts = df_group['matchup'].value_counts()
+				matchup_earliest_id = {}
+				matchup_latest_id = {}
+				for _, row in df_group.iterrows():
+					m_key = row['matchup']
+					if m_key not in matchup_earliest_id:
+						matchup_earliest_id[m_key] = row['game_id']
+					matchup_latest_id[m_key] = max(matchup_latest_id.get(m_key, 0), row['game_id'])
+
+				playoff_ids = []
+				for m_key, count in matchup_counts.items():
+					if count >= 2: # Playoffs series play multiple games
+						playoff_ids.append(matchup_earliest_id[m_key])
+						playoff_ids.append(matchup_latest_id[m_key])
+						
+				if playoff_ids:
+					playoff_start = min(playoff_ids)
+					playoff_end = max(playoff_ids)
+				else:
+					playoff_start = 999999
+					playoff_end = 0
+
+				matchup_round_name = {}
+				for m_key, count in matchup_counts.items():
+					earliest_id = matchup_earliest_id[m_key]
+					if count >= 2:
+						matchup_round_name[m_key] = "Playoffs"
+					else:
+						if earliest_id < playoff_start:
+							matchup_round_name[m_key] = "Play-In"
+						else:
+							matchup_round_name[m_key] = "Final Four"
+
+				# Collect and label Final Four games chronologically (No 3rd-place consolation game)
+				f4_rows = []
+				for idx, row in df_group.iterrows():
+					m_key = row['matchup']
+					if matchup_round_name.get(m_key) == "Final Four":
+						f4_rows.append((row['game_id'], idx))
+						
+				f4_rows = sorted(f4_rows, key=lambda x: x[0])
+				f4_labels = {}
+				for rank, (gid, idx) in enumerate(f4_rows):
+					if rank < 2:
+						f4_labels[idx] = "Final Four Semifinal"
+					else:
+						f4_labels[idx] = "Final Four Final"
+
+				seen_counts = {}
+				for idx, row in df_group.iterrows():
+					m_key = row['matchup']
+					stage_name = matchup_round_name.get(m_key, "Playoffs")
+					
+					if stage_name == "Playoffs":
+						seen_counts[m_key] = seen_counts.get(m_key, 0) + 1
+						round_label = f"Playoffs G{seen_counts[m_key]}"
+					elif stage_name == "Play-In":
+						round_label = "Play-In"
+					else: # Final Four
+						round_label = f4_labels.get(idx, "Final Four")
+						
+					final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
+					
+			else:
+				# --- FEB and other leagues postseason logic (remains completely untouched and safe) ---
+				seen_counts = {}
+				for _, row in df_group.iterrows():
+					m_key = row['matchup']
+					seen_counts[m_key] = seen_counts.get(m_key, 0) + 1
+					round_label = f"Playoffs G{seen_counts[m_key]}"
+					final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
 		else:
 				# --- THE FIXED ROUND LOGIC ---
 				unique_teams = set(df_group['t1']) | set(df_group['t2'])
