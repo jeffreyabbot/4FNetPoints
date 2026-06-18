@@ -96,6 +96,84 @@ def get_league_zone_benchmarks(league, season):
 			zone_pps[zone] = fallbacks.get(zone, 1.0) # Safety fallback
 			
 	return zone_pps
+# --- GLOBAL TREND PLOT HELPERS ---
+
+def robust_player_match(n_in_game, n_target):
+	"""
+	Combines direct normalized matching and fuzzy surname splitting.
+	Ensures players are linked accurately across games despite minor format changes.
+	"""
+	if not n_in_game or not n_target:
+		return False
+	
+	# 1. Exact jersey-less match
+	def sn(t):
+		clean = clean_player_name(t)
+		return re.sub(r'[\s\.]+', '', normalize_str(clean))
+	
+	if sn(n_in_game) == sn(n_target):
+		return True
+		
+	# 2. Fuzzy / Shared Surname Match Fallback
+	def deep_clean_name(name):
+		n = re.sub(r'\.(?=[A-Za-z])', '. ', str(name))
+		n = re.sub(r'[\d\.\#\-\,]+', '', n.upper())
+		n = normalize_str(n)
+		words = [w for w in n.split() if len(w) > 1]
+		return " ".join(words), set(words)
+		
+	target_clean, target_words = deep_clean_name(n_target)
+	raw_clean, raw_words = deep_clean_name(n_in_game)
+	
+	if not target_words or not raw_words:
+		return SequenceMatcher(None, target_clean, raw_clean).ratio() > 0.8
+		
+	if not target_words.isdisjoint(raw_words):
+		return True
+		
+	return SequenceMatcher(None, target_clean, raw_clean).ratio() > 0.7
+
+
+@st.cache_data
+def get_player_season_trend_data(player_name, team_name, league, season, analysis_type, game_metadata_list):
+	"""
+	Iterates sequentially through games, extracting individual player records.
+	Cached via Streamlit to guarantee instant interactive load speeds.
+	"""
+	trend_records = []
+	
+	for g in game_metadata_list:
+		df_game_ind = (
+			load_single_game_individual(g['path'], team_name) 
+			if analysis_type == "4-Factors Net Points" 
+			else load_single_game_classic_individual(g['path'], team_name)
+		)
+		
+		if df_game_ind is not None and not df_game_ind.empty:
+			g_p_col = next((c for c in df_game_ind.columns if c.upper() == 'PLAYER'), None)
+			if g_p_col:
+				match_mask = [robust_player_match(name, player_name) for name in df_game_ind[g_p_col]]
+				p_game_row = df_game_ind[match_mask]
+				
+				if not p_game_row.empty:
+					p_stats = p_game_row.iloc[0].to_dict()
+					
+					is_t1 = g['t1'] == team_name
+					opp_team = g['t2'] if is_t1 else g['t1']
+					pts_self = g['pts1'] if is_t1 else g['pts2']
+					pts_opp = g['pts2'] if is_t1 else g['pts1']
+					is_win = pts_self > pts_opp
+					
+					record = {
+						"Round": g['round'],
+						"Opponent": opp_team,
+						"Matchup": f"{g['round']} vs {opp_team} ({'W' if is_win else 'L'} {pts_self}-{pts_opp})",
+						"Is_Win": is_win
+					}
+					record.update(p_stats)
+					trend_records.append(record)
+					
+	return pd.DataFrame(trend_records)
 def highlight_scouting_outliers(val, col_name, actual_sort_col=None, is_large_sample=False):
 	"""Global scouting thresholds for Bold Red (Elite) and Bold Blue (Liability).
 	Adapts thresholds depending on whether it's a large sample (season) or small sample (single game/H2H)."""
@@ -3036,17 +3114,24 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				return df[mask].copy()
 			return df
 
-		# --- DUAL-DATA RENDERER ---
+		# --- DUAL-DATA RENDERER (Nested to preserve closure on local variables) ---
 		def render_table_and_radar(df_table, df_zones, team_name, suffix):
 			if df_table is None or df_table.empty:
 				st.warning("No data found.")
 				return
 
-			tab_table, tab_radar = st.tabs(["Impact Table", "Shot Radar"])
+			# Check if we should include the Season Trend tab
+			show_trend = (mode == "Season Aggregates per Team")
+
+			if show_trend:
+				tab_table, tab_radar, tab_trend = st.tabs(["Impact Table", "Shot Radar", "Season Trend"])
+			else:
+				tab_table, tab_radar = st.tabs(["Impact Table", "Shot Radar"])
 
 			with tab_table:
 				display_player_table(df_table, f"{team_name} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
 				st.markdown("**Note:** Players with fewer games may have more volatile Net Points. Use the slider to filter by Games Played.")
+			
 			with tab_radar:
 				try:
 					def deep_clean_name(name):
@@ -3054,13 +3139,11 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 						n = re.sub(r'\.(?=[A-Za-z])', '. ', str(name))
 						n = re.sub(r'[\d\.\#\-\,]+', '', n.upper())
 						n = normalize_str(n)
-						# Keep words > 1 char (keeps LO, BA, SY, drops initials like M)
 						words = [w for w in n.split() if len(w) > 1]
 						return " ".join(words), set(words)
 
 					p_col_t = next((c for c in df_table.columns if c.upper() == 'PLAYER'), 'Player')
 					
-					# Filter valid players for the dropdown
 					valid_players = []
 					for p in df_table[p_col_t].unique():
 						p_str = str(p).upper().strip()
@@ -3086,12 +3169,10 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 							
 							def is_match(raw_val):
 								raw_clean, raw_words = deep_clean_name(raw_val)
-								# Safety fallback
 								if not raw_words or not target_words: 
 									from difflib import SequenceMatcher
 									return SequenceMatcher(None, target_clean, raw_clean).ratio() > 0.8
 								
-								# Shared surname logic (If they share 'CALANCHE', it's him)
 								if not target_words.isdisjoint(raw_words):
 									return True
 								
@@ -3139,36 +3220,287 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 								else:
 									st.info(f"Shot zone data for {sel_p} is empty (0/0 shots).")
 							else:
-								st.warning(f"Could not link shot zone data for {sel_p}. (Data mismatch between sources)")
-								
-								# --- DEBUG VISUALIZER ---
-								st.error("🚨 DEBUGGING MODE ACTIVE")
-								st.write(f"**Target Player Selected:** `{sel_p}`")
-								st.write(f"**Target Words Searched:** `{target_words}`")
-								
-								st.write("**Here is every player the radar found in the Boxscore Data (`df_zones`) for this team:**")
-								
-								# Build a dataframe to show what the computer sees
-								available_names = df_zones[p_col_z].unique()
-								debug_data = []
-								for raw_n in available_names:
-									cln, wrds = deep_clean_name(raw_n)
-									
-									# Calculate the fuzzy ratio just to see what it was
-									from difflib import SequenceMatcher
-									fuzzy_ratio = SequenceMatcher(None, target_clean, cln).ratio()
-									
-									debug_data.append({
-										"1. Raw Name in File": raw_n,
-										"2. Cleaned Name": cln,
-										"3. Extracted Words": str(wrds),
-										"4. Fuzzy Match %": f"{fuzzy_ratio:.1%}"
-									})
-								
-								st.dataframe(pd.DataFrame(debug_data), use_container_width=True)
-								# --- END DEBUG VISUALIZER ---
+								st.warning(f"Could not link shot zone data for {sel_p}.")
 				except Exception as e:
 					st.error(f"Radar Error: {e}")
+
+			if show_trend:
+				with tab_trend:
+					p_col_t = next((c for c in df_table.columns if c.upper() == 'PLAYER'), 'Player')
+					valid_players = []
+					for p in df_table[p_col_t].unique():
+						p_str = str(p).upper().strip()
+						if len(p_str) >= 2 and not any(x in p_str for x in ["TOTAL", "TEAM", "EQUIP"]):
+							valid_players.append(p)
+					
+					if not valid_players:
+						st.info("No player data available for season trend.")
+					else:
+						col_sel, _ = st.columns([0.3, 0.7])
+						with col_sel:
+							sel_p_trend = st.selectbox("Select Player for Trend:", sorted(valid_players), key=f"trend_p_sel_{suffix}")
+
+						# Extract chronological sequential ID from filename safely
+					def get_chrono_id(path_str):
+						if not path_str:
+							return 0
+						filename = os.path.basename(str(path_str))
+						match = re.search(r'(\d+)', filename)
+						return int(match.group(1)) if match else 0
+
+					game_metadata = []
+					mask_games = (df_index['league'] == league) & (df_index['season'] == season) & \
+								 ((df_index['t1'] == team_name) | (df_index['t2'] == team_name))
+					
+					# Sort chronologically by the numerical ID in the path filename
+					team_games = df_index[mask_games].copy()
+					team_games['chrono_sort'] = team_games['path'].apply(get_chrono_id)
+					team_games = team_games.sort_values('chrono_sort')
+						
+					for _, row in team_games.iterrows():
+							game_metadata.append({
+								'path': row['path'],
+								'round': row['round'],
+								't1': row['t1'],
+								't2': row['t2'],
+								'pts1': row['pts1'],
+								'pts2': row['pts2']
+							})
+
+					with st.spinner("Extracting performance metrics..."):
+							df_trend = get_player_season_trend_data(sel_p_trend, team_name, league, season, analysis_type, game_metadata)
+
+					if df_trend is None or df_trend.empty:
+							st.warning(f"No game-by-game data found for {sel_p_trend} in the current selection.")
+					else:
+							trend_cols_map = {c.upper().strip(): c for c in df_trend.columns}
+
+							ctrl_c1, ctrl_c2, ctrl_c3 = st.columns([1, 1, 1])
+							
+							with ctrl_c1:
+								plot_mode = st.toggle("Cumulative Plot", value=False, key=f"trend_cum_toggle_{suffix}")
+							
+							if analysis_type == "4-Factors Net Points":
+								with ctrl_c2:
+									perspective = st.selectbox("Perspective", ["Net", "Offense", "Defense"], key=f"trend_persp_sel_{suffix}")
+								with ctrl_c3:
+									metric_sel = st.selectbox("Metric", ["Total NP", "Shooting", "Turnovers", "Rebounding", "Free Throws"], key=f"trend_metric_sel_{suffix}")
+
+								col_map = {
+									("Net", "Total NP"): "Total_NP",
+									("Net", "Shooting"): "Net_Shooting",
+									("Net", "Turnovers"): "Net_TOV",
+									("Net", "Rebounding"): "Net_ORB",
+									("Net", "Free Throws"): "Net_FT",
+									("Offense", "Total NP"): "Off_NP",
+									("Offense", "Shooting"): "Off_Shooting",
+									("Offense", "Turnovers"): "Off_TOV",
+									("Offense", "Rebounding"): "Off_ORB",
+									("Offense", "Free Throws"): "Off_FT",
+									("Defense", "Total NP"): "Def_NP",
+									("Defense", "Shooting"): "Def_Shooting",
+									("Defense", "Turnovers"): "Def_TOV",
+									("Defense", "Rebounding"): "Def_ORB",
+									("Defense", "Free Throws"): "Def_FT"
+								}
+								actual_col_key = col_map.get((perspective, metric_sel))
+								matched_col = trend_cols_map.get(actual_col_key.upper().strip()) if actual_col_key else None
+							else:
+								classic_metrics = ["PTS", "USG%", "eFG%", "TS%", "TO%", "OR%", "FTR", "AST/TO", "Plays", "Pts/Play", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
+								with ctrl_c2:
+									metric_sel = st.selectbox("Metric", [m for m in classic_metrics if m.upper() in trend_cols_map], key=f"trend_metric_classic_{suffix}")
+								perspective = "Classic"
+								matched_col = trend_cols_map.get(metric_sel.upper())
+
+							if not matched_col:
+								st.error(f"Stat '{metric_sel}' could not be matched.")
+							else:
+								rounds_list = df_trend['Round'].tolist()
+								if len(rounds_list) > 1:
+									selected_range = st.select_slider(
+										"Select Round Range",
+										options=rounds_list,
+										value=(rounds_list[0], rounds_list[-1]),
+										key=f"trend_range_slider_{suffix}"
+									)
+									start_idx = rounds_list.index(selected_range[0])
+									end_idx = rounds_list.index(selected_range[1])
+									df_plot = df_trend.iloc[start_idx:end_idx+1].copy()
+								else:
+									df_plot = df_trend.copy()
+
+								opt_c1, opt_c2 = st.columns(2)
+								with opt_c1:
+									show_running_avg = st.checkbox("Show Running Average Line", value=False, key=f"trend_show_avg_{suffix}")
+								with opt_c2:
+									show_outcome_markers = st.checkbox("Color Markers by Outcome", value=True, key=f"trend_show_outcome_{suffix}")
+
+								x_vals = df_plot['Round'].tolist()
+								y_vals = pd.to_numeric(df_plot[matched_col], errors='coerce').fillna(0).tolist()
+								matchups = df_plot['Matchup'].tolist()
+								outcomes = df_plot['Is_Win'].tolist()
+
+								fig = go.Figure()
+
+								if not plot_mode:
+									# --- VIEW MODE A: Game-Level Plot ---
+									min_val = min(y_vals)
+									max_val = max(y_vals)
+									
+									if min_val >= 0:
+										# Entirely positive: solid reddish fill
+										colorscale = [
+											[0.0, 'rgba(224, 102, 102, 0.20)'],
+											[1.0, 'rgba(224, 102, 102, 0.20)']
+										]
+									elif max_val <= 0:
+										# Entirely negative: solid blueish fill
+										colorscale = [
+											[0.0, 'rgba(111, 168, 220, 0.20)'],
+											[1.0, 'rgba(111, 168, 220, 0.20)']
+										]
+									else:
+										# Spans across zero: split colorscale precisely at zero-crossing
+										span = max_val - min_val
+										zero_pos = (0 - min_val) / span
+										colorscale = [
+											[0.0, 'rgba(111, 168, 220, 0.20)'],       # Blueish below zero
+											[zero_pos, 'rgba(111, 168, 220, 0.20)'],  # Blueish up to zero-crossing
+											[zero_pos, 'rgba(224, 102, 102, 0.20)'],  # Reddish right above zero-crossing
+											[1.0, 'rgba(224, 102, 102, 0.20)']        # Reddish above zero
+										]
+
+									# Single unified spline trace with vertical gradient fill
+									fig.add_trace(go.Scatter(
+										x=x_vals,
+										y=y_vals,
+										mode='lines+markers',
+										name=f'Game-level {metric_sel}',
+										line=dict(color='#2c3e50', width=2.5, shape='spline'),
+										fill='tozeroy',
+										fillgradient=dict(
+											type='vertical',
+											start=min_val,
+											stop=max_val,
+											colorscale=colorscale
+										),
+										marker=dict(
+											size=8,
+											color=['#e06666' if w else '#6fa8dc' for w in outcomes] if show_outcome_markers else '#2c3e50',
+											line=dict(width=1.5, color='#ffffff')
+										),
+										text=matchups,
+										hovertemplate="<b>%{text}</b><br>Value: %{y:+.2f}<extra></extra>" if analysis_type == "4-Factors Net Points" else "<b>%{text}</b><br>Value: %{y:.2f}<extra></extra>"
+									))
+								else:
+									# --- VIEW MODE B: Cumulative Plot ---
+									cumulative_y = []
+									running_total = 0.0
+									for v in y_vals:
+										running_total += v
+										cumulative_y.append(running_total)
+
+									min_val_cum = min(cumulative_y)
+									max_val_cum = max(cumulative_y)
+									
+									if min_val_cum >= 0:
+										# Entirely positive sum: solid reddish fill
+										colorscale_cum = [
+											[0.0, 'rgba(224, 102, 102, 0.20)'],
+											[1.0, 'rgba(224, 102, 102, 0.20)']
+										]
+									elif max_val_cum <= 0:
+										# Entirely negative sum: solid blueish fill
+										colorscale_cum = [
+											[0.0, 'rgba(111, 168, 220, 0.20)'],
+											[1.0, 'rgba(111, 168, 220, 0.20)']
+										]
+									else:
+										# Spans across zero: split colorscale precisely at zero-crossing
+										span_cum = max_val_cum - min_val_cum
+										zero_pos_cum = (0 - min_val_cum) / span_cum
+										colorscale_cum = [
+											[0.0, 'rgba(111, 168, 220, 0.20)'],           # Blueish below zero
+											[zero_pos_cum, 'rgba(111, 168, 220, 0.20)'],  # Blueish up to zero-crossing
+											[zero_pos_cum, 'rgba(224, 102, 102, 0.20)'],  # Reddish right above zero-crossing
+											[1.0, 'rgba(224, 102, 102, 0.20)']            # Reddish above zero
+										]
+
+									fig.add_trace(go.Scatter(
+										x=x_vals,
+										y=cumulative_y,
+										mode='lines+markers',
+										name='Cumulative Running Sum',
+										line=dict(color='#e06666', width=3, shape='spline'),
+										fill='tozeroy',
+										fillgradient=dict(
+											type='vertical',
+											start=min_val_cum,
+											stop=max_val_cum,
+											colorscale=colorscale_cum
+										),
+										marker=dict(size=8, color='#e06666', line=dict(width=1.5, color='#ffffff')),
+										text=matchups,
+										hovertemplate="<b>%{text}</b><br>Cumulative: %{y:+.2f}<extra></extra>" if analysis_type == "4-Factors Net Points" else "<b>%{text}</b><br>Cumulative: %{y:.2f}<extra></extra>"
+									))
+
+								if show_running_avg:
+									running_avgs = []
+									total_sum = 0.0
+									for idx, v in enumerate(y_vals):
+										total_sum += v
+										running_avgs.append(total_sum / (idx + 1))
+									
+									fig.add_trace(go.Scatter(
+										x=x_vals,
+										y=running_avgs,
+										mode='lines',
+										name='Running Avg',
+										line=dict(color='#7f8c8d', width=2, dash='dash'),
+										hoverinfo='skip'
+									))
+
+								fig.update_layout(
+									title=dict(
+										text=f"{sel_p_trend} - {perspective if analysis_type == '4-Factors Net Points' else ''} {metric_sel} Trend",
+										font=dict(size=14, color="#1e2130", weight="bold"),
+										x=0.5,
+										xanchor="center"
+									),
+									xaxis=dict(
+										showgrid=True,
+										gridcolor='#E5E7E9',
+										griddash='dot',
+										tickangle=45,
+										categoryorder='array',
+										categoryarray=x_vals
+									),
+									yaxis=dict(
+										showgrid=True,
+										gridcolor='#E5E7E9',
+										griddash='dot',
+										zeroline=True,
+										zerolinecolor='#2c3e50',
+										zerolinewidth=1.5
+									),
+									plot_bgcolor='white',
+									margin=dict(l=50, r=50, t=55, b=80),
+									height=450,
+									showlegend=True,
+									legend=dict(
+										orientation="h",
+										yanchor="bottom",
+										y=1.02,
+										xanchor="right",
+										x=1
+									)
+								)
+								
+								st.plotly_chart(
+									fig, 
+									use_container_width=True, 
+									key=f"trend_plotly_chart_{suffix}_{'cum' if plot_mode else 'level'}"
+								)
 
 		# --- DATA ROUTING ---
 		is_h2h = t2 != "League Average"
