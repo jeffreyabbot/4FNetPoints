@@ -2186,6 +2186,17 @@ elif mode == "Team Performance by Game":
 			df_team['venue'] = df_team.apply(lambda x: "Home" if x['t1'] == target_team else "Away", axis=1)
 			df_team['opponent'] = df_team.apply(lambda x: x['t2'] if x['t1'] == target_team else x['t1'], axis=1)
 
+			# Dynamically compute sequential chronological ordering key
+			def get_chrono_id_local(path_str):
+				if not path_str: return 0
+				filename = os.path.basename(str(path_str))
+				match = re.search(r'(\d+)', filename)
+				return int(match.group(1)) if match else 0
+			
+			df_team['chrono_sort'] = df_team['path'].apply(get_chrono_id_local)
+			# Sort the team base DataFrame chronologically immediately
+			df_team = df_team.sort_values('chrono_sort').copy()
+
 			all_opponents = sorted(list(set(df_team['opponent'].unique())))
 
 			# --- RESET LOGIC ---
@@ -2214,7 +2225,7 @@ elif mode == "Team Performance by Game":
 				with f_col1: res_choice = st.multiselect("Game Result", ["Win", "Loss"], default=["Win", "Loss"], key="perf_res_choice")
 				with f_col2: venue_choice = st.multiselect("Venue", ["Home", "Away"], default=["Home", "Away"], key="perf_venue_choice")
 				
-				all_rnds = sorted(df_team['round'].unique())
+				all_rnds = list(df_team['round'].unique())
 				range_rnds = st.select_slider("Round Range", options=all_rnds, value=(all_rnds[0], all_rnds[-1]), key="perf_range_rnds")
 				
 				with st.expander("Refine Rivals", expanded=False):
@@ -2253,7 +2264,8 @@ elif mode == "Team Performance by Game":
 					if analysis_type == "4-Factors Classic ":
 						st.caption("**Note:** Situational points (Fast Break, 2nd Chance, TO-Pts) are standardized to **Per 100 Possessions** to compare performance across different game paces.")
 					performance_data = []
-					for _, row in df_filtered.sort_values('round').iterrows():
+					for _, row in df_filtered.sort_values('chrono_sort').iterrows():
+						g = get_raw_game_data_custom(row['path'])
 						g = get_raw_game_data_custom(row['path'])
 						if not g: continue
 						is_t1 = row['t1'] == target_team
@@ -2352,29 +2364,50 @@ elif mode == "Team Performance by Game":
 					st.dataframe(styler, use_container_width=False, hide_index=True, height=dynamic_height_team, column_order=cols_visible, column_config=col_config_team)
 
 				with tab_player_view:
-					# Logic for individual data gatherer
+					# 1. Attempt to load the pre-calculated aggregate totals
 					if analysis_type == "4-Factors Net Points":
 						df_ind_agg = load_individual_aggregate(target_team, league, season, sel_phase)
 					else:
 						df_ind_agg = load_aggregated_classic_individual_data(target_team, league, season, sel_phase)
 					
+					# 2. Extract player list from aggregate totals if present
+					player_list = []
 					if df_ind_agg is not None and not df_ind_agg.empty:
 						agg_p_col = next((c for c in df_ind_agg.columns if c.upper() == 'PLAYER'), 'Player')
-						# Helper to strip leading numbers (12. P. ORIOLA -> P. ORIOLA)
 						def clean_p_name(t): return re.sub(r'^\d+[\s\.\-]*', '', str(t).strip())
-						# Build A-Z unique clean list
 						player_list = sorted(list(set([
 							clean_p_name(p) for p in df_ind_agg[agg_p_col].unique()
-							if not any(x in str(p).upper() for x in ['TEAM', 'TOTAL', 'EQUIP'])
+							if not any(x in str(p).upper() for x in ['TEAM', 'TOTAL', 'EQUIP', 'ENTRENADOR'])
 						])))
-						
+					
+					# 3. SELF-HEALING FALLBACK: If aggregate file is missing, dynamically compile player roster from individual files
+					if not player_list:
+						dynamic_players = set()
+						for _, row in df_filtered.iterrows():
+							df_game_ind = (
+								load_single_game_individual(row['path'], target_team) 
+								if analysis_type == "4-Factors Net Points" 
+								else load_single_game_classic_individual(row['path'], target_team)
+							)
+							if df_game_ind is not None and not df_game_ind.empty:
+								p_col = next((c for c in df_game_ind.columns if c.upper() == 'PLAYER'), 'Player')
+								for p in df_game_ind[p_col].unique():
+									p_str = str(p).upper().strip()
+									clean_name = re.sub(r'^\d+[\s\.\-]*', '', p_str)
+									if clean_name and not any(x in clean_name for x in ['TOTAL', 'TEAM', 'EQUIP', 'ENTRENADOR']):
+										dynamic_players.add(clean_name)
+						player_list = sorted(list(dynamic_players))
+
+					# 4. Render selection controls and data tables
+					if player_list:
 						col_sel, col_view = st.columns([1, 3])
-						with col_sel: selected_player = st.selectbox("Select Player", player_list, key=f"p_sel_{target_team}_{sel_phase}")
+						with col_sel: 
+							selected_player = st.selectbox("Select Player", player_list, key=f"p_sel_{target_team}_{sel_phase}")
 						with col_view:
 							if analysis_type == "4-Factors Net Points":
 								player_view_type = st.radio("Analysis Perspective", ["Net Impact", "Offensive Impact", "Defensive Impact"], horizontal=True, key=f"p_view_{target_team}")
 	
-						# NEW: Add the checkboxes horizontally
+						# Add the checkboxes horizontally
 						cb_col1, cb_col2 = st.columns(2)
 						with cb_col1: 
 							expand_off_def_perf = st.checkbox("Show Offense/Defense Breakdown", value=False, key=f"cb_offdef_perf_{target_team}_{sel_phase}") if analysis_type == "4-Factors Net Points" else False
@@ -2383,15 +2416,18 @@ elif mode == "Team Performance by Game":
 
 						def is_player_match(n_in_game, n_target):
 							if not n_in_game or not n_target: return False
-							# Clean both names to ensure jersey-less matching
 							def sn(t):
 								clean = clean_player_name(t)
 								return re.sub(r'[\s\.]+', '', normalize_str(clean))
 							return sn(n_in_game) == sn(n_target)
 
 						player_perf_data = []
-						for _, row in df_filtered.sort_values('round').iterrows():
-							df_game_ind = load_single_game_individual(row['path'], target_team) if analysis_type == "4-Factors Net Points" else load_single_game_classic_individual(row['path'], target_team)
+						for _, row in df_filtered.sort_values('chrono_sort').iterrows():
+							df_game_ind = (
+								load_single_game_individual(row['path'], target_team) 
+								if analysis_type == "4-Factors Net Points" 
+								else load_single_game_classic_individual(row['path'], target_team)
+							)
 							if df_game_ind is not None and not df_game_ind.empty:
 								g_p_col = next((c for c in df_game_ind.columns if c.upper() == 'PLAYER'), None)
 								if g_p_col:
@@ -2402,95 +2438,87 @@ elif mode == "Team Performance by Game":
 										p_stats['Round'], p_stats['Opp_Logo'], p_stats['Matchup'] = row['round'], get_team_icon(row['opponent'], league), f"{'W' if row['is_win'] else 'L'} {row['opponent']}"
 										player_perf_data.append(p_stats)
 
+						player_df = pd.DataFrame(player_perf_data)
+						
+						if player_df.empty:
+							st.warning(f"No game data recorded for {selected_player} within the selected round range or filter combinations.")
 						else:
-							player_df = pd.DataFrame(player_perf_data)
+							p_cols = ["Round", "Opp_Logo", "Matchup"]
 							
-							# --- CRITICAL FIX: Wrap styling and slicing in a safety check ---
-							if player_df.empty:
-								st.warning(f"No game data recorded for {selected_player} within the selected round range or filter combinations.")
-							else:
-								p_cols = ["Round", "Opp_Logo", "Matchup"]
+							if analysis_type == "4-Factors Net Points":
+								prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
 								
-								if analysis_type == "4-Factors Net Points":
-									prefix = {"Net Impact": "Net_", "Offensive Impact": "Off_", "Defensive Impact": "Def_"}[player_view_type]
-									
-									# 1. Determine the primary Net Points metric based on selected view
-									main_np_col = "Total_NP" if player_view_type == "Net Impact" else f"{prefix}NP"
-									p_numeric = []
-									
-									if main_np_col in player_df.columns:
-										p_numeric.append(main_np_col)
-									
-									# 2. Gather factor metrics
+								main_np_col = "Total_NP" if player_view_type == "Net Impact" else f"{prefix}NP"
+								p_numeric = []
+								
+								if main_np_col in player_df.columns:
+									p_numeric.append(main_np_col)
+								
+								for f in ["Shooting", "TOV", "ORB", "FT"]:
+									col_name = f"{prefix}{f}"
+									if col_name in player_df.columns:
+										p_numeric.append(col_name)
+								
+								exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
+								exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+
+								if exp_off:
+									for np_col in ["Off_NP", "Def_NP"]:
+										if np_col in player_df.columns and np_col not in p_numeric:
+											p_numeric.append(np_col)
+											
 									for f in ["Shooting", "TOV", "ORB", "FT"]:
-										col_name = f"{prefix}{f}"
-										if col_name in player_df.columns:
-											p_numeric.append(col_name)
-									
-									exp_off = st.session_state.get(f"cb_offdef_perf_{target_team}_{sel_phase}", False)
-									exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+										if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
+										if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
+										
+								if exp_shoot:
+									for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
+										if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+										
+							else:
+								p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
+								exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
+								if exp_shoot:
+									for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
+										if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
+							
+							p_cols += [c for c in p_numeric if c in player_df.columns]
+							
+							focus_col, _ = st.columns([1, 3])
+							with focus_col:
+								p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
 
-									if exp_off:
-										# Add Off_NP and Def_NP if Off/Def breakdown is expanded
-										for np_col in ["Off_NP", "Def_NP"]:
-											if np_col in player_df.columns and np_col not in p_numeric:
-												p_numeric.append(np_col)
-												
-										for f in ["Shooting", "TOV", "ORB", "FT"]:
-											if f"Off_{f}" in player_df.columns and f"Off_{f}" not in p_numeric: p_numeric.append(f"Off_{f}")
-											if f"Def_{f}" in player_df.columns and f"Def_{f}" not in p_numeric: p_numeric.append(f"Def_{f}")
-											
-									if exp_shoot:
-										for shot in ['Off_2P', 'Off_3P', 'Def_2P', 'Def_3P']:
-											if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
-											
-								else:
-									# This handles the classic metrics when "4-Factors Classic" is active
-									p_numeric = ["PTS", "USG%", "eFG%", "TO%", "OR%", "FTR", "Pts_off_TO", "2nd_Chance", "Fast_Break"]
-									exp_shoot = st.session_state.get(f"cb_shoot_perf_{target_team}_{sel_phase}", False)
-									if exp_shoot:
-										for shot in ['F2M', 'F2A', 'F3M', 'F3A']:
-											if shot in player_df.columns and shot not in p_numeric: p_numeric.append(shot)
-								
-								p_cols += [c for c in p_numeric if c in player_df.columns]
-								
-								# --- DYNAMIC FOCUS FOR PLAYER TRENDS ---
-								focus_col, _ = st.columns([1, 3])
-								with focus_col:
-									p_focus = st.selectbox("Highlight Trend:", p_numeric, key=f"focus_p_{target_team}_{selected_player}")
+							def get_col_format(col_name):
+								if '%' in col_name: return "{:.1%}"
+								if col_name == 'FTR': return "{:.3f}"
+								if col_name in ['F2M', 'F2A', 'F3M', 'F3A']: return "{:.0f}"
+								if analysis_type == "4-Factors Classic ": return "{:.2f}"
+								return "{:+.2f}"
 
-								def get_col_format(col_name):
-									if '%' in col_name: return "{:.1%}"
-									if col_name == 'FTR': return "{:.3f}"
-									if col_name in ['F2M', 'F2A', 'F3M', 'F3A']: return "{:.0f}"
-									if analysis_type == "4-Factors Classic ": return "{:.2f}"
-									return "{:+.2f}"
+							p_format = {k: get_col_format(k) for k in p_numeric}
+							styler_p = player_df[p_cols].style.format(p_format)
+							
+							for col in [c for c in p_numeric if c in player_df.columns]:
+								styler_p = styler_p.map(
+									lambda x, c=col: highlight_scouting_outliers(x, c, p_focus, is_large_sample=False), 
+									subset=[col]
+								)
 
-								p_format = {k: get_col_format(k) for k in p_numeric}
-								styler_p = player_df[p_cols].style.format(p_format)
-								
-								# --- APPLY STYLING (Outliers + Thermal Focus) ---
-								for col in [c for c in p_numeric if c in player_df.columns]:
-									# 1. Apply the "Scout's Eye" Bold Text Highlighting (Force single-game logic)
-									styler_p = styler_p.map(
-										lambda x, c=col: highlight_scouting_outliers(x, c, p_focus, is_large_sample=False), 
-										subset=[col]
-									)
+								if col == p_focus:
+									if player_df[col].min() != player_df[col].max():
+										if 'TO%' in col: cmap = custom_redblue
+										elif any(x in col for x in ['PTS', 'USG%', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
+											cmap = custom_wred
+										else: cmap = custom_bluered
+										
+										styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
 
-									# 2. Apply the Thermal Background to the focused column
-									if col == p_focus:
-										if player_df[col].min() != player_df[col].max():
-											if 'TO%' in col: cmap = custom_redblue
-											elif any(x in col for x in ['PTS', 'USG%', 'Pts_off_TO', '2nd_Chance', 'Fast_Break', 'F2M', 'F2A', 'F3M', 'F3A']):
-												cmap = custom_wred
-											else: cmap = custom_bluered
-											
-											styler_p = styler_p.background_gradient(subset=[col], cmap=cmap)
-
-								dynamic_height_p = (len(player_df) * 36) + 45
-								col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
-								for c in p_numeric: col_config_p[c] = st.column_config.NumberColumn(c, width="small")
-								st.dataframe(styler_p, use_container_width=False, hide_index=True, height=dynamic_height_p, column_config=col_config_p)
+							dynamic_height_p = (len(player_df) * 36) + 45
+							col_config_p = {"Opp_Logo": st.column_config.ImageColumn("Opp", width="small"), "Round": st.column_config.TextColumn("Rnd", width="small"), "Matchup": st.column_config.TextColumn("Matchup", width="medium")}
+							for c in p_numeric: col_config_p[c] = st.column_config.NumberColumn(c, width="small")
+							st.dataframe(styler_p, use_container_width=False, hide_index=True, height=dynamic_height_p, column_config=col_config_p)
+					else:
+						st.warning("No player logs found inside individual playoff game files.")
 
 elif mode == "Overall League Standings":
 	# 1. Phase Selection
