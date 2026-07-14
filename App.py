@@ -437,7 +437,227 @@ def get_team_icon(team_name, current_league=None):
 		except Exception:
 			return None
 	return None
+def get_sig_words(text):
+	s = normalize_str(text)
+	ignore = {'THE', 'CLUB', 'BASQUET', 'BASKET', 'BALONCESTO', 'DEPORTIVA', 'U.E.', 'C.B.', 'CB'}
+	return {w for w in s.split() if len(w) > 2 and w not in ignore}
 
+@st.cache_data
+def get_team_win_counts(league, season, target_team=None):
+	mask = (df_index['league'] == league) & (df_index['season'] == season)
+	df_ls = df_index[mask]
+	
+	target_phase = None
+	if target_team:
+		t_games = df_ls[(df_ls['t1'] == target_team) | (df_ls['t2'] == target_team)]
+		reg_phases = []
+		for p in t_games['phase'].unique():
+			p_lower = str(p).lower()
+			if not any(x in p_lower for x in ["playoff", "post", "final", "f4", "semifinal", "cuartos"]):
+				reg_phases.append(p)
+		if reg_phases:
+			target_phase = reg_phases[0]
+			
+	if target_phase:
+		df_ls = df_ls[df_ls['phase'] == target_phase]
+	else:
+		def is_not_post(p):
+			p_lower = str(p).lower()
+			return not any(x in p_lower for x in ["playoff", "post", "final", "f4", "semifinal", "cuartos"])
+		df_ls = df_ls[df_ls['phase'].apply(is_not_post)]
+
+	all_teams_in_set = set(df_ls['t1'].unique()) | set(df_ls['t2'].unique())
+	win_counts = {t: 0 for t in all_teams_in_set}
+		
+	for _, row in df_ls.iterrows():
+		t1, t2 = row['t1'], row['t2']
+		p1, p2 = row['pts1'], row['pts2']
+		
+		norm_t1 = next((team for team in all_teams_in_set if len(get_sig_words(team) & get_sig_words(t1)) > 0), t1)
+		norm_t2 = next((team for team in all_teams_in_set if len(get_sig_words(team) & get_sig_words(t2)) > 0), t2)
+		
+		if p1 > p2:
+			win_counts[norm_t1] = win_counts.get(norm_t1, 0) + 1
+		elif p2 > p1:
+			win_counts[norm_t2] = win_counts.get(norm_t2, 0) + 1
+			
+	return win_counts
+
+@st.cache_data
+def get_opponent_tiers(league, season, target_team=None):
+	win_counts = get_team_win_counts(league, season, target_team)
+	sorted_teams = sorted(win_counts.keys(), key=lambda x: win_counts[x], reverse=True)
+	n = len(sorted_teams)
+	
+	top_n = min(5, n)
+	top_5 = sorted_teams[:top_n]
+	
+	if n > top_n:
+		bot_n = min(5, n - top_n)
+		bottom_5 = sorted_teams[-bot_n:] if bot_n > 0 else []
+	else:
+		bottom_5 = []
+		
+	rest = [t for t in sorted_teams if t not in top_5 and t not in bottom_5]
+	
+	return {
+		"Top 5 Teams": tuple(top_5),
+		"Bottom 5 Teams": tuple(bottom_5),
+		"Middle Teams": tuple(rest),
+		"All Teams": tuple(sorted_teams)
+	}
+
+@st.cache_data
+def get_dynamic_team_volumes_filtered(team_name, league, season, allowed_opponents_tuple=None):
+	mask = (df_index['league'] == league) & (df_index['season'] == season) & \
+		   ((df_index['t1'] == team_name) | (df_index['t2'] == team_name))
+	games = df_index[mask]
+	
+	stats_acc = {
+		"pts": 0, "f2m": 0, "f2a": 0, "f3m": 0, "f3a": 0, "ftm": 0, "fta": 0, 
+		"drb": 0, "orb": 0, "tov": 0, "pts_off_to": 0, "pts_2nd_ch": 0, "pts_fb": 0
+	}
+	rival_stats_acc = stats_acc.copy()
+	total_gp = 0
+	
+	for _, row in games.iterrows():
+		is_t1 = row['t1'] == team_name
+		opp_team = row['t2'] if is_t1 else row['t1']
+		
+		if allowed_opponents_tuple is not None:
+			opp_words = get_sig_words(opp_team)
+			match_found = False
+			for allowed_opp in allowed_opponents_tuple:
+				allowed_words = get_sig_words(allowed_opp)
+				if len(opp_words & allowed_words) > 0:
+					match_found = True
+					break
+			if not match_found:
+				continue
+				
+		game_data = get_raw_game_data_custom(row['path'])
+		if not game_data:
+			continue
+			
+		total_gp += 1
+		raw_self = game_data['t1_stats'] if is_t1 else game_data['t2_stats']
+		raw_opp = game_data['t2_stats'] if is_t1 else game_data['t1_stats']
+		
+		for k in stats_acc:
+			stats_acc[k] += float(raw_self.get(k, 0))
+			rival_stats_acc[k] += float(raw_opp.get(k, 0))
+			
+	if total_gp == 0:
+		empty = {k: 0.0 for k in stats_acc}
+		empty['gp'] = 1
+		return empty, empty
+		
+	avg_self = {k: v / total_gp for k, v in stats_acc.items()}
+	avg_self['gp'] = total_gp
+	avg_opp = {k: v / total_gp for k, v in rival_stats_acc.items()}
+	avg_opp['gp'] = total_gp
+	
+	return avg_self, avg_opp
+
+@st.cache_data
+def load_filtered_player_aggregate_net(target_team, league, season, allowed_opponents_tuple=None):
+	mask = (df_index['league'] == league) & (df_index['season'] == season)
+	df_ls = df_index[mask]
+	
+	all_game_stats = []
+	for _, row in df_ls.iterrows():
+		is_t1 = row['t1'] == target_team
+		is_t2 = row['t2'] == target_team
+		if not (is_t1 or is_t2):
+			continue
+			
+		opp_team = row['t2'] if is_t1 else row['t1']
+		if allowed_opponents_tuple is not None:
+			opp_words = get_sig_words(opp_team)
+			if not any(len(opp_words & get_sig_words(allowed)) > 0 for allowed in allowed_opponents_tuple):
+				continue
+				
+		df_game = load_single_game_individual(row['path'], target_team)
+		if df_game is not None and not df_game.empty:
+			all_game_stats.append(df_game)
+			
+	if not all_game_stats:
+		return None
+		
+	combined = pd.concat(all_game_stats, ignore_index=True)
+	cols_to_sum = combined.select_dtypes(include=['number']).columns.tolist()
+	
+	h2h_totals = combined.groupby('Player', as_index=False)[cols_to_sum].sum()
+	
+	if avg_mode == "Season Value (Team GP)":
+		divisor = float(len(all_game_stats))
+	else:
+		divisor = h2h_totals['GP'].replace(0, 1)
+		
+	for col in h2h_totals.columns:
+		if col in ['Player', 'Team_Name', 'GP']:
+			continue
+		h2h_totals[col] = h2h_totals[col] / divisor
+		
+	h2h_totals['Team_Name'] = target_team
+	return h2h_totals
+
+@st.cache_data
+def load_filtered_player_aggregate_classic(target_team, league, season, allowed_opponents_tuple=None):
+	mask = (df_index['league'] == league) & (df_index['season'] == season)
+	df_ls = df_index[mask]
+	
+	all_game_stats = []
+	for _, row in df_ls.iterrows():
+		is_t1 = row['t1'] == target_team
+		is_t2 = row['t2'] == target_team
+		if not (is_t1 or is_t2):
+			continue
+			
+		opp_team = row['t2'] if is_t1 else row['t1']
+		if allowed_opponents_tuple is not None:
+			opp_words = get_sig_words(opp_team)
+			if not any(len(opp_words & get_sig_words(allowed)) > 0 for allowed in allowed_opponents_tuple):
+				continue
+				
+		df_game = load_single_game_classic_individual(row['path'], target_team)
+		if df_game is not None and not df_game.empty:
+			all_game_stats.append(df_game)
+			
+	if not all_game_stats:
+		return None
+		
+	combined = pd.concat(all_game_stats, ignore_index=True)
+	cols_to_sum = ["PTS", "F2M", "F2A", "F3M", "F3A", "FTM", "FTA", "AS", "ORB", "DRB", "TOV", 
+				   "Pts_off_TO", "2nd_Chance", "Fast_Break", "FGA", "FGM", "GP", "MIN", 
+				   "Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP", 
+				   "RIM FGA", "RIM FGM", "PAINT FGA", "PAINT FGM", "MR FGA", "MR FGM", 
+				   "COR3 FGA", "COR3 FGM", "ATB3 FGA", "ATB3 FGM", "Plays"]
+	
+	valid_cols = [c for c in cols_to_sum if c in combined.columns]
+	h2h_totals = combined.groupby('Player', as_index=False)[valid_cols].sum()
+	
+	if avg_mode == "Season Value (Team GP)":
+		divisor = float(len(all_game_stats))
+	else:
+		divisor = h2h_totals['GP'].replace(0, 1)
+		
+	for col in h2h_totals.columns:
+		if col in ['Player', 'Team_Name', 'GP'] or col in ["Team_FGA", "Team_FTA", "Team_TOV", "Team_ORB", "Opp_DRB", "Team_MP"]:
+			continue
+		h2h_totals[col] = h2h_totals[col] / divisor
+		
+	h2h_totals['eFG%'] = h2h_totals.apply(lambda x: (x.get('FGM',0) + 0.5 * x.get('F3M',0)) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
+	h2h_totals['TO%'] = h2h_totals.apply(lambda x: x.get('TOV',0) / (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) if (x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) > 0 else 0, axis=1)
+	h2h_totals['FTR'] = h2h_totals.apply(lambda x: x.get('FTM',0) / x['FGA'] if x.get('FGA', 0) > 0 else 0, axis=1)
+	h2h_totals['TS%'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / (2 * (x.get('FGA', 0) + 0.44 * x.get('FTA', 0))) if (x.get('FGA', 0) + 0.44 * x.get('FTA', 0)) > 0 else 0, axis=1)
+	h2h_totals['Pts/Play'] = h2h_totals.apply(lambda x: x.get('PTS', 0) / x.get('Plays', 1) if x.get('Plays', 0) > 0 else 0, axis=1)
+	h2h_totals['AST/TO'] = h2h_totals.apply(lambda x: x.get('AS', 0) / x.get('TOV', 1) if x.get('TOV', 0) > 0 else 0, axis=1)
+	h2h_totals['USG%'] = h2h_totals.apply(lambda x: ((x.get('FGA',0) + 0.44 * x.get('FTA',0) + x.get('TOV',0)) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_FGA',1) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0))) if (x.get('MIN',0) > 0 and (x.get('Team_FGA',0) + 0.44 * x.get('Team_FTA',0) + x.get('Team_TOV',0)) > 0) else 0, axis=1)
+	h2h_totals['OR%'] = h2h_totals.apply(lambda x: (x.get('ORB',0) * (x.get('Team_MP',200) / 5)) / (x.get('MIN',1) * (x.get('Team_ORB',1) + x.get('Opp_DRB',0))) if (x.get('MIN',0) > 0 and (x.get('Team_ORB',0) + x.get('Opp_DRB',0)) > 0) else 0, axis=1)
+	h2h_totals['Team_Name'] = target_team
+	
+	return h2h_totals
 def load_single_game_individual(file_path, target_team):
 	try:
 		# 1. Path Setup: Locate the 'individual' folder relative to the raw file
@@ -2066,20 +2286,26 @@ with st.sidebar.expander("System & Benchmarks", expanded=False):
 	with col_lg2:
 		st.markdown(f"**OR%:** `{lg_orb_pct:.1%}`")
 
-# --- NEW LOGIC FOR TEAM VS LEAGUE ---
 # --- NEW LOGIC FOR TEAM VS LEAGUE (NOW SUPPORTS TEAM VS TEAM) ---
 if mode == "Season Aggregates per Team":
 	teams = get_teams_in_league(league, season)
 	
-	# UI: Select Team 1 and Team 2 (Defaulting to League Average)
+	# UI: Select Team 1
 	t1 = sidebar_filters.selectbox("Select Team", teams, index=0, key="t1_agg")
+	
+	# --- INTEGRATE OPONENT QUALITY DROPDOWN ---
+	opponent_tiers = get_opponent_tiers(league, season, target_team=t1)
+	tier_options = ["All Teams", "Top 5 Teams", "Bottom 5 Teams", "Middle Teams"]
+	selected_tier = sidebar_filters.selectbox("Filter Opponents by Win Quality", tier_options, index=0, key="tier_filter_sel")
+	allowed_opps = opponent_tiers[selected_tier] if selected_tier != "All Teams" else None
+	
+	# UI: Select Team 2
 	t2_options = ["League Average"] + teams
 	t2 = sidebar_filters.selectbox("Compare With", t2_options, index=0, key="t2_agg")
 	
-	# Calculate Team 1 
-	t1_off = get_per_game_volumes(t1, league, season, "TOTAL")
+	# Calculate Team 1 dynamically using the opponent filter
+	t1_off, t1_def = get_dynamic_team_volumes_filtered(t1, league, season, allowed_opps)
 	max_gp_possible = int(t1_off.get('gp', 1))
-	t1_def = get_per_game_volumes(t1, league, season, "Rival")
 	
 	lg_raw = calc_raw_factors(lg_data, lg_data['drb'], lg_effic, lg_orb_pct)
 	t1_off_raw = calc_raw_factors(t1_off, t1_def['drb'], lg_effic, lg_orb_pct)
@@ -2093,9 +2319,11 @@ if mode == "Season Aggregates per Team":
 		i2_tot = {k: 0.0 for k in lg_raw}
 		i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (lg_raw, lg_raw)
 		header_title = f"Season Profile: {t1} vs League Average"
+		if selected_tier != "All Teams":
+			header_title += f" (vs {selected_tier})"
 	else:
-		t2_off = get_per_game_volumes(t2, league, season, "TOTAL")
-		t2_def = get_per_game_volumes(t2, league, season, "Rival")
+		# Calculate Team 2 dynamically using the same opponent filter
+		t2_off, t2_def = get_dynamic_team_volumes_filtered(t2, league, season, allowed_opps)
 		
 		t2_off_raw = calc_raw_factors(t2_off, t2_def['drb'], lg_effic, lg_orb_pct)
 		t2_def_raw = calc_raw_factors(t2_def, t2_off['drb'], lg_effic, lg_orb_pct)
@@ -2103,6 +2331,8 @@ if mode == "Season Aggregates per Team":
 		i2_tot = {k: (t2_off_raw[k] - lg_raw[k]) + (lg_raw[k] - t2_def_raw[k]) for k in lg_raw}
 		i1_raw, i2_raw = (t1_off_raw, t1_def_raw), (t2_off_raw, t2_def_raw)
 		header_title = f"Season Profile: {t1} vs {t2}"
+		if selected_tier != "All Teams":
+			header_title += f" (vs {selected_tier})"
 
 # --- 2. MODE: HEAD TO HEAD MATCHUP (Team A vs Team B Sum) ---
 elif mode == "Head to Head Matchup":
@@ -2894,9 +3124,15 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				st.markdown("---")
 
 	# --- TAB SYSTEM (Now correctly indented inside the IF block) ---
-	tab_team, tab_players = st.tabs(["Team Comparison", "Player Impact"])
+	# --- HORIZONTAL NAVIGATION BAR (Replaces buggy st.tabs) ---
+	active_tab = st.radio(
+		"View Perspective", 
+		["Team Comparison", "Player Impact"], 
+		horizontal=True, 
+		key="main_scouting_navigation"
+	)
 
-	with tab_team:
+	if active_tab == "Team Comparison":
 		if analysis_type == "4-Factors Net Points":
 			if mode == "Head to Head Matchup" or mode == "Games Boxscores":
 				st.markdown("#### Matchup Bottom Line (Net Points)")
@@ -3110,27 +3346,18 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 					with c_mid:
 						st.dataframe(build_4f_styler(df_4f, False), use_container_width=True, height=175, column_config=col_cfg)
 
-	with tab_players:
+	elif active_tab == "Player Impact":
 		is_large_sample_mode = (mode == "Season Aggregates per Team")
-
-		# 1. UI Settings
-		if analysis_type == "4-Factors Net Points":
-			c_ui1, c_ui2 = st.columns(2)
-			with c_ui1: expand_off_def = st.checkbox("Show Offense/Defense Breakdown", value=False, key="cb_offdef_match")
-			with c_ui2: expand_shooting = st.checkbox("Show 2P/3P Shooting Split", value=False, key="cb_shoot_match")
-		else:
-			expand_off_def, expand_shooting = False, False
 
 		st.markdown("---")
 		
-		# 2. GP Filter
+		# 2. GP Filter (Rendered directly to prevent DOM-reconstruction tab resets)
 		min_gp_filter = 1
 		if mode in ["Season Aggregates per Team", "Head to Head Matchup"]:
 			t_vol = get_per_game_volumes(t1, league, season)
 			max_gp_possible = int(t_vol.get('gp', 1))
 			if max_gp_possible > 1:
-				c_gp, _ = st.columns([1, 3])
-				with c_gp: min_gp_filter = st.slider("Min. Games Played", 1, max_gp_possible, 1, key="min_gp_slider")
+				min_gp_filter = st.slider("Min. Games Played", 1, max_gp_possible, 1, key="min_gp_slider")
 
 		def apply_gp_filter(df, target_min):
 			if df is None or df.empty: return df
@@ -3148,19 +3375,29 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				st.warning("No data found.")
 				return
 
-			# Check if we should include the Season Trend tab
+			# Check if we should include the Season Trend option
 			show_trend = (mode == "Season Aggregates per Team")
+			metric_options = ["Impact Table", "Shot Radar", "Season Trend"] if show_trend else ["Impact Table", "Shot Radar"]
 
-			if show_trend:
-				tab_table, tab_radar, tab_trend = st.tabs(["Impact Table", "Shot Radar", "Season Trend"])
-			else:
-				tab_table, tab_radar = st.tabs(["Impact Table", "Shot Radar"])
+			# Horizontal selector for Player Metrics (Immune to resets)
+			active_metric_view = st.radio(
+				"Metric Perspective",
+				metric_options,
+				horizontal=True,
+				key=f"active_metric_view_sel_{suffix}"
+			)
 
-			with tab_table:
+			if active_metric_view == "Impact Table":
+				if analysis_type == "4-Factors Net Points":
+					expand_off_def = st.checkbox("Show Offense/Defense Breakdown", value=False, key=f"cb_offdef_{suffix}")
+					expand_shooting = st.checkbox("Show 2P/3P Shooting Split", value=False, key=f"cb_shoot_{suffix}")
+				else:
+					expand_off_def, expand_shooting = False, False
+
 				display_player_table(df_table, f"{team_name} Individual Stats", expand_off_def, expand_shooting, is_large_sample_mode)
 				st.markdown("**Note:** Players with fewer games may have more volatile Net Points. Use the slider to filter by Games Played.")
-			
-			with tab_radar:
+    
+			elif active_metric_view == "Shot Radar":
 				try:
 					def deep_clean_name(name):
 						if not name or pd.isna(name): return "", set()
@@ -3181,9 +3418,7 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 					if not valid_players:
 						st.info("No player data available for radar.")
 					else:
-						col_sel, _ = st.columns([0.3, 0.7])
-						with col_sel:
-							sel_p = st.selectbox("Select Player:", sorted(valid_players), key=f"rad_sel_{suffix}")
+						sel_p = st.selectbox("Select Player:", sorted(valid_players), key=f"rad_sel_{suffix}")
 						
 						eff = float(lg_effic)
 						orb_p = float(lg_orb_pct)
@@ -3252,26 +3487,21 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 				except Exception as e:
 					st.error(f"Radar Error: {e}")
 
-			if show_trend:
-				with tab_trend:
-					p_col_t = next((c for c in df_table.columns if c.upper() == 'PLAYER'), 'Player')
-					valid_players = []
-					for p in df_table[p_col_t].unique():
-						p_str = str(p).upper().strip()
-						if len(p_str) >= 2 and not any(x in p_str for x in ["TOTAL", "TEAM", "EQUIP"]):
-							valid_players.append(p)
-					
-					if not valid_players:
-						st.info("No player data available for season trend.")
-					else:
-						col_sel, _ = st.columns([0.3, 0.7])
-						with col_sel:
-							sel_p_trend = st.selectbox("Select Player for Trend:", sorted(valid_players), key=f"trend_p_sel_{suffix}")
+			elif active_metric_view == "Season Trend" and show_trend:
+				p_col_t = next((c for c in df_table.columns if c.upper() == 'PLAYER'), 'Player')
+				valid_players = []
+				for p in df_table[p_col_t].unique():
+					p_str = str(p).upper().strip()
+					if len(p_str) >= 2 and not any(x in p_str for x in ["TOTAL", "TEAM", "EQUIP"]):
+						valid_players.append(p)
+				
+				if not valid_players:
+					st.info("No player data available for season trend.")
+				else:
+					sel_p_trend = st.selectbox("Select Player for Trend:", sorted(valid_players), key=f"trend_p_sel_{suffix}")
 
-						# Extract chronological sequential ID from filename safely
 					def get_chrono_id(path_str):
-						if not path_str:
-							return 0
+						if not path_str: return 0
 						filename = os.path.basename(str(path_str))
 						match = re.search(r'(\d+)', filename)
 						return int(match.group(1)) if match else 0
@@ -3473,17 +3703,26 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 									))
 
 								if show_running_avg:
-									running_avgs = []
-									total_sum = 0.0
-									for idx, v in enumerate(y_vals):
-										total_sum += v
-										running_avgs.append(total_sum / (idx + 1))
-									
+									if not plot_mode:
+										# Standard game-by-game running average
+										running_avgs = []
+										total_sum = 0.0
+										for idx, v in enumerate(y_vals):
+											total_sum += v
+											running_avgs.append(total_sum / (idx + 1))
+										y_plot = running_avgs
+										line_name = "Running Avg"
+									else:
+										# Cumulative Pace Line (overall selected average * game count)
+										overall_avg = sum(y_vals) / len(y_vals) if len(y_vals) > 0 else 0.0
+										y_plot = [overall_avg * (idx + 1) for idx in range(len(y_vals))]
+										line_name = "Average Pace"
+
 									fig.add_trace(go.Scatter(
 										x=x_vals,
-										y=running_avgs,
+										y=y_plot,
 										mode='lines',
-										name='Running Avg',
+										name=line_name,
 										line=dict(color='#7f8c8d', width=2, dash='dash'),
 										hoverinfo='skip'
 									))
@@ -3533,48 +3772,79 @@ if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscor
 		# --- DATA ROUTING ---
 		is_h2h = t2 != "League Average"
 		c_phase = phase if 'phase' in locals() else None
+		
+		# Helper to safely evaluate if a win-quality filter is active
+		has_tier_filter = (
+			mode == "Season Aggregates per Team" 
+			and 'selected_tier' in locals() 
+			and selected_tier != "All Teams"
+		)
 
 		if is_h2h:
-			p_tabs = st.tabs([f"{t1}", f"{t2}"])
-			with p_tabs[0]:
+			# Horizontal team selection for players (replaces buggy st.tabs)
+			active_player_team = st.radio(
+				"Select Team Profile",
+				[t1, t2],
+				horizontal=True,
+				key=f"active_player_team_selector_{t1}_{t2}"
+			)
+			if active_player_team == t1:
+				if has_tier_filter:
+					if analysis_type == "4-Factors Net Points":
+						d_t = load_filtered_player_aggregate_net(t1, league, season, allowed_opps)
+						d_z = load_filtered_player_aggregate_classic(t1, league, season, allowed_opps)
+					else:
+						d_t = load_filtered_player_aggregate_classic(t1, league, season, allowed_opps)
+						d_z = d_t
+				else:
+					if analysis_type == "4-Factors Net Points":
+						if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t1), load_single_game_classic_individual(game_record['path'], t1)
+						elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t1, t2, league, season), load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
+						else: d_t, d_z = load_individual_aggregate(t1, league, season, c_phase), load_aggregated_classic_individual_data(t1, league, season, c_phase)
+					else: # 4-Factors Classic
+						if mode == "Games Boxscores": d_t = load_single_game_classic_individual(game_record['path'], t1)
+						elif mode == "Head to Head Matchup": d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
+						else: d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
+						d_z = d_t
+				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t1, "t1_h2h")
+				
+			elif active_player_team == t2:
+				if has_tier_filter:
+					if analysis_type == "4-Factors Net Points":
+						d_t = load_filtered_player_aggregate_net(t2, league, season, allowed_opps)
+						d_z = load_filtered_player_aggregate_classic(t2, league, season, allowed_opps)
+					else:
+						d_t = load_filtered_player_aggregate_classic(t2, league, season, allowed_opps)
+						d_z = d_t
+				else:
+					if analysis_type == "4-Factors Net Points":
+						if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t2), load_single_game_classic_individual(game_record['path'], t2)
+						elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t2, t1, league, season), load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
+						else: d_t, d_z = load_individual_aggregate(t2, league, season, c_phase), load_aggregated_classic_individual_data(t2, league, season, c_phase)
+					else: # 4-Factors Classic
+						if mode == "Games Boxscores": d_t = load_single_game_classic_individual(game_record['path'], t2)
+						elif mode == "Head to Head Matchup": d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
+						else: d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase)
+						d_z = d_t
+				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t2, "t2_h2h")
+		else:
+			if has_tier_filter:
+				if analysis_type == "4-Factors Net Points":
+					d_t = load_filtered_player_aggregate_net(t1, league, season, allowed_opps)
+					d_z = load_filtered_player_aggregate_classic(t1, league, season, allowed_opps)
+				else:
+					d_t = load_filtered_player_aggregate_classic(t1, league, season, allowed_opps)
+					d_z = d_t
+			else:
 				if analysis_type == "4-Factors Net Points":
 					if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t1), load_single_game_classic_individual(game_record['path'], t1)
-					elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t1, t2, league, season), load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
 					else: d_t, d_z = load_individual_aggregate(t1, league, season, c_phase), load_aggregated_classic_individual_data(t1, league, season, c_phase)
 				else: # 4-Factors Classic
 					if mode == "Games Boxscores":
 						d_t = load_single_game_classic_individual(game_record['path'], t1)
-					elif mode == "Head to Head Matchup":
-						d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase, opponent_team=t2)
 					else:
 						d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
 					d_z = d_t
-				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t1, "t1_h2h")
-				
-			with p_tabs[1]:
-				if analysis_type == "4-Factors Net Points":
-					if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t2), load_single_game_classic_individual(game_record['path'], t2)
-					elif mode == "Head to Head Matchup": d_t, d_z = load_h2h_individual_data(t2, t1, league, season), load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
-					else: d_t, d_z = load_individual_aggregate(t2, league, season, c_phase), load_aggregated_classic_individual_data(t2, league, season, c_phase)
-				else: # 4-Factors Classic
-					if mode == "Games Boxscores":
-						d_t = load_single_game_classic_individual(game_record['path'], t2)
-					elif mode == "Head to Head Matchup":
-						d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase, opponent_team=t1)
-					else:
-						d_t = load_aggregated_classic_individual_data(t2, league, season, c_phase)
-					d_z = d_t
-				render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t2, "t2_h2h")
-		else:
-			if analysis_type == "4-Factors Net Points":
-				if mode == "Games Boxscores": d_t, d_z = load_single_game_individual(game_record['path'], t1), load_single_game_classic_individual(game_record['path'], t1)
-				else: d_t, d_z = load_individual_aggregate(t1, league, season, c_phase), load_aggregated_classic_individual_data(t1, league, season, c_phase)
-			else: # 4-Factors Classic
-				if mode == "Games Boxscores":
-					d_t = load_single_game_classic_individual(game_record['path'], t1)
-				else:
-					d_t = load_aggregated_classic_individual_data(t1, league, season, c_phase)
-				d_z = d_t
 			render_table_and_radar(apply_gp_filter(d_t, min_gp_filter), apply_gp_filter(d_z, min_gp_filter), t1, "t1_single")
 # --- GLOSSARY / INTERPRETATION ---
 if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"] and analysis_type == "4-Factors Net Points":
