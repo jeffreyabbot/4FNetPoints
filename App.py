@@ -393,6 +393,8 @@ def get_logo_filename_map(last_mod_time):
 			team_key = normalize_str(name_part)
 			mapping[team_key] = f
 	return mapping
+
+@st.cache_data
 def get_team_icon(team_name, current_league=None):
 	"""Finds logo using normalized matching. 
 	If 'League Average', returns the logo for the specific league.
@@ -658,6 +660,8 @@ def load_filtered_player_aggregate_classic(target_team, league, season, allowed_
 	h2h_totals['Team_Name'] = target_team
 	
 	return h2h_totals
+
+@st.cache_data(show_spinner=False)
 def load_single_game_individual(file_path, target_team):
 	try:
 		# 1. Path Setup: Locate the 'individual' folder relative to the raw file
@@ -941,7 +945,9 @@ def get_per_game_volumes(team_name, league, season, row_label="TOTAL"):
 		"pts_2nd_ch": stats_acc["pts_2nd_ch"] / total_gp,
 		"pts_fb": stats_acc["pts_fb"] / total_gp
 	}
-def load_individual_aggregate(team_name, league, season, phase=None):
+ 
+@st.cache_data
+def load_individual_aggregate(team_name, league, season, phase=None, avg_mode="Scouting (Player GP)"):
     if phase is None or not isinstance(phase, str) or phase == "":
         folder_phase = "Regular_Season"
     else:
@@ -997,6 +1003,8 @@ def load_individual_aggregate(team_name, league, season, phase=None):
     except Exception as e:
         st.write(f"DEBUG: Error loading {team_name}: {e}")
         return None
+    
+@st.cache_data(show_spinner=False)   
 def load_single_game_classic_individual(file_path, target_team):
 	try:
 		df = pd.read_excel(file_path, header=None)
@@ -1477,6 +1485,8 @@ def to_per_100(stats):
 	adj['pts_fb'] = stats.get('pts_fb', 0) * multiplier
 	
 	return adj
+
+@st.cache_data(show_spinner=False)
 def get_raw_game_data_custom(file_path):
 	df = pd.read_excel(file_path, header=None)
 	total_rows = df[df[0] == "TOTAL"]
