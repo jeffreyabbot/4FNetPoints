@@ -35,6 +35,7 @@ custom_redblue = LinearSegmentedColormap.from_list("redblue", ["#e06666", "#ffff
 
 # 3. White-Red (For Volumes: Shows intensity without "bad" blue)
 custom_wred = LinearSegmentedColormap.from_list("wred", ["#ffffff", "#e06666"])
+st.set_page_config(page_title="4Factors Net Points", layout="wide")
 def clean_num(val):
 	if pd.isna(val) or val == "" or val == "-": return 0.0
 	try: return float(val)
@@ -2138,7 +2139,7 @@ st.markdown("""
 		}
 	</style>
 """, unsafe_allow_html=True)
-st.set_page_config(page_title="4Factors Net Points", layout="wide")
+
 if not os.path.exists("game_index.json"): build_game_index()
 @st.cache_data
 def load_index(): return pd.read_json("game_index.json") if os.path.exists("game_index.json") else pd.DataFrame()
@@ -2170,18 +2171,7 @@ avg_mode = st.sidebar.radio(
 )
 # --- ADD THIS LINE: Reserve an empty space for future filters ---
 sidebar_filters = st.sidebar.container()
-# --- 3. THE MATH (Invisible - no st. calls here) ---
-# These calculations MUST happen before the "if mode == ..." blocks
-t1_off, t2_off = None, None
-i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "", "", ""
 
-lg_effic, lg_orb_pct, lg_data = get_league_benchmarks(league, season)
-lg_fga = lg_data['f2a'] + lg_data['f3a']
-lg_fgm = lg_data['f2m'] + lg_data['f3m']
-avg_efg = (lg_fgm + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
-avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) > 0 else 0.16
-avg_ftr = lg_data['ftm'] / lg_fga if lg_fga > 0 else 0.25
-avg_orb = lg_orb_pct
 
 st.sidebar.markdown("---")
 if mode == "Home":
@@ -2281,6 +2271,19 @@ if mode == "Home":
         
     # Stop execution here so the Matchup/Display logic doesn't run
     st.stop()
+# --- 3. THE MATH (Invisible - no st. calls here) ---
+# These calculations MUST happen before the "if mode == ..." blocks
+t1_off, t2_off = None, None
+i1_tot, i2_tot, i1_raw, i2_raw, t1, t2, header_title = None, None, None, None, "", "", ""
+
+lg_effic, lg_orb_pct, lg_data = get_league_benchmarks(league, season)
+lg_fga = lg_data['f2a'] + lg_data['f3a']
+lg_fgm = lg_data['f2m'] + lg_data['f3m']
+avg_efg = (lg_fgm + 0.5 * lg_data['f3m']) / lg_fga if lg_fga > 0 else 0.52
+avg_to = lg_data['tov'] / (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) if (lg_fga + 0.44 * lg_data['fta'] + lg_data['tov']) > 0 else 0.16
+avg_ftr = lg_data['ftm'] / lg_fga if lg_fga > 0 else 0.25
+avg_orb = lg_orb_pct
+
 # --- 4. SYSTEM UTILITIES (Keep it simple) ---
 with st.sidebar.expander("System & Benchmarks", expanded=False):
 	if st.button("Refresh Data Index"):
