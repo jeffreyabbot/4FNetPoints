@@ -1489,20 +1489,46 @@ def to_per_100(stats):
 
 @st.cache_data(show_spinner=False)
 def get_raw_game_data_custom(file_path):
-	df = pd.read_excel(file_path, header=None)
-	total_rows = df[df[0] == "TOTAL"]
-	if len(total_rows) < 2: return None
-	t1_row, t2_row = total_rows.iloc[0], total_rows.iloc[1]
-	def parse_row(row):
-		return {"pts": clean_num(row[1]), "f2m": clean_num(row[2]), "f2a": clean_num(row[3]),
-				"f3m": clean_num(row[4]), "f3a": clean_num(row[5]), "ftm": clean_num(row[6]),
-				"fta": clean_num(row[7]), "drb": clean_num(row[9]), "orb": clean_num(row[10]), "tov": clean_num(row[14]),
-	# NEW FIELDS:
-				"pts_off_to": clean_num(row[19]), # Row 19
-				"pts_2nd_ch": clean_num(row[20]), # Row 20
-				"pts_fb": clean_num(row[21]) }     # Row 21
-	return {"t1_name": str(df.iloc[1, 0]), "t2_name": str(df.iloc[2, 0]),
-			"t1_stats": parse_row(t1_row), "t2_stats": parse_row(t2_row)}
+    if not file_path:
+        return None
+        
+    # 1. Convert Windows backslashes (\) to cross-platform forward slashes (/)
+    file_path = str(file_path).replace('\\', '/')
+    
+    # 2. If it was stored as an absolute path locally, trim to repo relative path
+    if not os.path.exists(file_path) and "informes_data" in file_path:
+        file_path = file_path[file_path.find("informes_data"):]
+
+    # 3. If file is still missing on the server, skip safely instead of crashing
+    if not os.path.exists(file_path):
+        return None
+
+    try:
+        df = pd.read_excel(file_path, header=None)
+        total_rows = df[df[0] == "TOTAL"]
+        if len(total_rows) < 2: 
+            return None
+            
+        t1_row, t2_row = total_rows.iloc[0], total_rows.iloc[1]
+        
+        def parse_row(row):
+            return {
+                "pts": clean_num(row[1]), "f2m": clean_num(row[2]), "f2a": clean_num(row[3]),
+                "f3m": clean_num(row[4]), "f3a": clean_num(row[5]), "ftm": clean_num(row[6]),
+                "fta": clean_num(row[7]), "drb": clean_num(row[9]), "orb": clean_num(row[10]), 
+                "tov": clean_num(row[14]), "pts_off_to": clean_num(row[19]), 
+                "pts_2nd_ch": clean_num(row[20]), "pts_fb": clean_num(row[21])
+            }
+            
+        return {
+            "t1_name": str(df.iloc[1, 0]), 
+            "t2_name": str(df.iloc[2, 0]),
+            "t1_stats": parse_row(t1_row), 
+            "t2_stats": parse_row(t2_row)
+        }
+    except Exception:
+        return None
+    
 def build_game_index():
 	raw_data = []
 	print("\n--- [START DYNAMIC INDEXING] ---")
@@ -1544,7 +1570,8 @@ def build_game_index():
 								raw_data.append({
 									"league": league, "season": season, "phase_orig": phase_unified,
 									"group": group_name, "game_id": game_id, 
-									"t1": t1_raw, "t2": t2_raw, "path": file_path
+									"t1": t1_raw, "t2": t2_raw, 
+									"path": file_path.replace('\\', '/')    # <--- Forces forward slashes
 								})
 							except: continue
 
@@ -1706,10 +1733,11 @@ def extract_game_details(row, lg, sn, ph_orig, gp, round_label):
 		display_phase = f"{clean_ph} - {gp}" if gp != "Main" else clean_ph
 
 		return {
-			"league": lg, "season": sn, "phase": display_phase,
-			"round": round_label, "t1": row['t1'], "t2": row['t2'],
-			"pts1": t1_pts, "pts2": t2_pts, "path": row['path']
-		}
+            "league": lg, "season": sn, "phase": display_phase,
+            "round": round_label, "t1": row['t1'], "t2": row['t2'],
+            "pts1": t1_pts, "pts2": t2_pts, 
+            "path": str(row['path']).replace('\\', '/')    # <--- Forces forward slashes
+        }
 	except:
 		return None
 @st.cache_data
@@ -3067,30 +3095,43 @@ elif mode == "Overall League Standings":
 				display_player_table(df_leaderboard.head(100), "League Leaderboard", exp_ld_offdef, exp_ld_shoot, is_large_sample=True)
 # --- 5. MODE: GAMES BOXSCORES (Single Game) ---
 else: 
-	df_f = df_league[df_league['season'] == season].copy()
-	phase_options = sorted(df_f['phase'].unique())
-	phase = sidebar_filters.selectbox("Phase / Group", phase_options, key="phase_sel")
-	df_f = df_f[df_f['phase'] == phase].copy()
-	
-	round_val = sidebar_filters.selectbox("Round", sorted(df_f['round'].unique()), key="round_sel")
-	df_f = df_f[df_f['round'] == round_val].copy()
-	
-	df_f['display'] = df_f.apply(lambda x: f"{x['round']} | {x['t1']} ({x['pts1']}) vs {x['t2']} ({x['pts2']})", axis=1)
-	game_display = sidebar_filters.selectbox("Game", df_f['display'].unique(), key="game_sel")
-	game_record = df_f[df_f['display'] == game_display].iloc[0]
-	
-	g = get_raw_game_data_custom(game_record['path'])
-	t1, t2 = g['t1_name'], g['t2_name']
-	t1_off, t2_off = g['t1_stats'], g['t2_stats'] # These are TOTALS for the game
-	
-	# Game Totals calculation
-	i1_tot = calc_raw_factors(t1_off, t2_off['drb'], lg_effic, lg_orb_pct)
-	i2_tot = calc_raw_factors(t2_off, t1_off['drb'], lg_effic, lg_orb_pct)
-	i1_raw, i2_raw = (i1_tot, i1_tot), (i2_tot, i2_tot)
-	
-	header_title = f"4-Factors Impact: {game_record['round']} - {t1} ({game_record['pts1']}) vs {t2} ({game_record['pts2']})"
-	# --- CORRECTED DATA AUDIT (VOLUME vs VOLUME) ---
-
+    df_f = df_league[df_league['season'] == season].copy()
+    phase_options = sorted(df_f['phase'].unique())
+    phase = sidebar_filters.selectbox("Phase / Group", phase_options, key="phase_sel")
+    df_f = df_f[df_f['phase'] == phase].copy()
+    
+    round_val = sidebar_filters.selectbox("Round", sorted(df_f['round'].unique()), key="round_sel")
+    df_f = df_f[df_f['round'] == round_val].copy()
+    
+    # Safe display string with double quotes outside and single quotes inside
+    df_f['display'] = df_f.apply(
+        lambda x: f"{x['round']} | {x['t1']} ({x['pts1']}) vs {x['t2']} ({x['pts2']})", 
+        axis=1
+    )
+    game_display = sidebar_filters.selectbox("Game", df_f['display'].unique(), key="game_sel")
+    game_record = df_f[df_f['display'] == game_display].iloc[0]
+    
+    # 1. Safely extract path and normalize slashes
+    g_path = str(game_record['path']).replace('\\', '/')
+    g = get_raw_game_data_custom(g_path)
+    if not g:
+        st.warning(f"Game data could not be loaded for path: {g_path}")
+        st.stop()
+        
+    t1, t2 = g['t1_name'], g['t2_name']
+    t1_off, t2_off = g['t1_stats'], g['t2_stats'] # These are TOTALS for the game
+    
+    # Game Totals calculation
+    i1_tot = calc_raw_factors(t1_off, t2_off['drb'], lg_effic, lg_orb_pct)
+    i2_tot = calc_raw_factors(t2_off, t1_off['drb'], lg_effic, lg_orb_pct)
+    i1_raw, i2_raw = (i1_tot, i1_tot), (i2_tot, i2_tot)
+    
+    # 2. Extract values into standalone variables to avoid f-string quote issues
+    g_rnd = game_record['round']
+    g_pts1 = game_record['pts1']
+    g_pts2 = game_record['pts2']
+    header_title = f"4-Factors Impact: {g_rnd} - {t1} ({g_pts1}) vs {t2} ({g_pts2})"
+    # --- CORRECTED DATA AUDIT (VOLUME vs VOLUME) ---
 # --- DISPLAY ---
 # Ensure we only try to render this if we are in a mode that defines matchup variables
 if mode in ["Season Aggregates per Team", "Head to Head Matchup", "Games Boxscores"]:
