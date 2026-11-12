@@ -2478,6 +2478,9 @@ elif mode == "Team Performance by Game":
 				st.session_state["perf_res_choice"] = ["Win", "Loss"]
 				st.session_state["perf_venue_choice"] = ["Home", "Away"]
 				if "perf_range_rnds" in st.session_state: del st.session_state["perf_range_rnds"]
+				# --- ADD THESE 2 LINES TO CLEAR RIVALS ON TEAM/SEASON CHANGE ---
+				if "perf_rival_choice" in st.session_state: del st.session_state["perf_rival_choice"]
+				st.session_state["sel_all_rivals"] = True
 				st.session_state["last_context"] = current_context
 				st.rerun()
 
@@ -2503,14 +2506,26 @@ elif mode == "Team Performance by Game":
 				
 				with st.expander("Refine Rivals", expanded=False):
 					select_all = st.checkbox("All Rivals", value=True, key="sel_all_rivals")
-					rival_choice = st.multiselect("Specific Rivals:", all_opponents, default=all_opponents if select_all else [], key="perf_rival_choice")
+					
+					# Sanitize session state so no rivals from past teams/seasons linger
+					if "perf_rival_choice" in st.session_state:
+						st.session_state["perf_rival_choice"] = [r for r in st.session_state["perf_rival_choice"] if r in all_opponents]
+
+					rival_choice = st.multiselect(
+						"Specific Rivals:", 
+						all_opponents, 
+						default=all_opponents, 
+						disabled=select_all,  # Grays out when All Rivals is ticked
+						key="perf_rival_choice"
+					)
 			st.markdown("---")
 
 			# --- 5. FILTERING LOGIC ---
 			# Safe fallbacks to prevent state loss on deployed environments (collapsed expanders / inactive tabs)
 			actual_res_choice = res_choice if res_choice else ["Win", "Loss"]
 			actual_venue_choice = venue_choice if venue_choice else ["Home", "Away"]
-			actual_rival_choice = rival_choice if rival_choice else all_opponents
+			# Explicitly respect 'select_all'
+			actual_rival_choice = all_opponents if select_all else (rival_choice if rival_choice else all_opponents)
 
 			allowed_wins = [True if r == "Win" else False for r in actual_res_choice]
 			
