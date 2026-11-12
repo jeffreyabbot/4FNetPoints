@@ -2180,6 +2180,7 @@ league = st.sidebar.selectbox("League", sorted(df_index['league'].unique()), key
 # Season depends on League
 df_league = df_index[df_index['league'] == league]
 season = st.sidebar.selectbox("Season", sorted(df_league['season'].unique(), reverse=True), key="season_sel")
+df_season = df_league[df_league['season'] == season]
 
 st.sidebar.markdown("---")
 # --- 2. NAVIGATION ---
@@ -2433,12 +2434,13 @@ elif mode == "Head to Head Matchup":
 	t1_off, t2_off = t1_h2h_avg, t2_h2h_avg 
 	i1_raw, i2_raw = (i1_tot, i1_tot), (i2_tot, i2_tot)
 	header_title = f"H2H Profile: {t1} vs {t2} (Average per Game)"
+ 
 elif mode == "Team Performance by Game":
 	# 1. SIDEBAR SELECTIONS
-	phases_avail = sorted(df_league['phase'].unique())
+	phases_avail = sorted(df_season['phase'].unique())
 	sel_phase = sidebar_filters.selectbox("Select Phase", phases_avail, key="perf_phase_sel")
 	
-	df_phase_indexed = df_league[df_league['phase'] == sel_phase]
+	df_phase_indexed = df_season[df_season['phase'] == sel_phase]
 	teams_in_phase = sorted(list(set(df_phase_indexed['t1'].unique()) | set(df_phase_indexed['t2'].unique())))
 	
 	if not teams_in_phase:
@@ -2447,8 +2449,8 @@ elif mode == "Team Performance by Game":
 		target_team = sidebar_filters.selectbox("Select Team", teams_in_phase, key="perf_team_sel")
 
 		# 2. DATA PREPARATION
-		df_team = df_league[(df_league['season'] == season) & (df_league['phase'] == sel_phase) & 
-							((df_league['t1'] == target_team) | (df_league['t2'] == target_team))].copy()
+		df_team = df_season[(df_season['season'] == season) & (df_season['phase'] == sel_phase) & 
+							((df_season['t1'] == target_team) | (df_season['t2'] == target_team))].copy()
 		
 		if df_team.empty:
 			st.error("No games found for this team in the selected phase.")
@@ -2793,7 +2795,7 @@ elif mode == "Team Performance by Game":
 
 elif mode == "Overall League Standings":
 	# 1. Phase Selection
-	phases_in_index = sorted(df_league['phase'].unique())
+	phases_in_index = sorted(df_season['phase'].unique())
 	phase_options = ["Overall Season"] + phases_in_index
 	selected_phase = sidebar_filters.selectbox("Phase / Group", phase_options, key="standings_phase")
 	
@@ -2806,9 +2808,9 @@ elif mode == "Overall League Standings":
 	
 	# --- 2. DEFINE TEAMS TO ANALYZE GLOBALLY FOR BOTH TABS ---
 	if selected_phase == "Overall Season":
-		teams_to_analyze = sorted(list(set(df_league['t1'].unique()) | set(df_league['t2'].unique())))
+		teams_to_analyze = sorted(list(set(df_season['t1'].unique()) | set(df_season['t2'].unique())))
 	else:
-		df_ph = df_league[df_league['phase'] == selected_phase]
+		df_ph = df_season[df_season['phase'] == selected_phase]
 		teams_to_analyze = sorted(list(set(df_ph['t1'].unique()) | set(df_ph['t2'].unique())))
 
 	# --- 3. ALWAYS SHOW BOTH TABS ---
