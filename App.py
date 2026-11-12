@@ -2507,24 +2507,27 @@ elif mode == "Team Performance by Game":
 				with st.expander("Refine Rivals", expanded=False):
 					select_all = st.checkbox("All Rivals", value=True, key="sel_all_rivals")
 					
-					# Sanitize session state so no rivals from past teams/seasons linger
-					if "perf_rival_choice" in st.session_state:
-						st.session_state["perf_rival_choice"] = [r for r in st.session_state["perf_rival_choice"] if r in all_opponents]
+					# Whenever 'All Rivals' is ticked, keep session_state synced with ALL opponents
+					if select_all or "perf_rival_choice" not in st.session_state:
+						st.session_state["perf_rival_choice"] = list(all_opponents)
+					else:
+						# If unticked, sanitize in case any opponent name changed
+						st.session_state["perf_rival_choice"] = [
+							r for r in st.session_state["perf_rival_choice"] if r in all_opponents
+						]
 
+					# Note: 'default' is removed so it strictly obeys session_state without glitches
 					rival_choice = st.multiselect(
 						"Specific Rivals:", 
-						all_opponents, 
-						default=all_opponents, 
-						disabled=select_all,  # Grays out when All Rivals is ticked
+						options=all_opponents, 
+						disabled=select_all, 
 						key="perf_rival_choice"
 					)
 			st.markdown("---")
 
 			# --- 5. FILTERING LOGIC ---
-			# Safe fallbacks to prevent state loss on deployed environments (collapsed expanders / inactive tabs)
 			actual_res_choice = res_choice if res_choice else ["Win", "Loss"]
 			actual_venue_choice = venue_choice if venue_choice else ["Home", "Away"]
-			# Explicitly respect 'select_all'
 			actual_rival_choice = all_opponents if select_all else (rival_choice if rival_choice else all_opponents)
 
 			allowed_wins = [True if r == "Win" else False for r in actual_res_choice]
