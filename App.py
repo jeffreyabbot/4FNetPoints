@@ -2168,10 +2168,54 @@ st.markdown("""
 	</style>
 """, unsafe_allow_html=True)
 
-if not os.path.exists("game_index.json"): build_game_index()
+def get_data_signature():
+	"""Quickly checks total count of raw files and newest modification time (takes ~2ms)."""
+	total_files = 0
+	newest_mtime = 0.0
+	if not os.path.exists(DATA_BASE_PATH):
+		return "0_0"
+	for root, _, files in os.walk(DATA_BASE_PATH):
+		if os.path.basename(root).lower() == "raw":
+			for f in files:
+				if f.endswith(".xlsx") and not f.startswith("~$"):
+					total_files += 1
+					try:
+						mt = os.path.getmtime(os.path.join(root, f))
+						if mt > newest_mtime:
+							newest_mtime = mt
+					except OSError:
+						pass
+	return f"{total_files}_{newest_mtime}"
+
 @st.cache_data
-def load_index(): return pd.read_json("game_index.json") if os.path.exists("game_index.json") else pd.DataFrame()
-df_index = load_index()
+def load_or_build_index(data_sig):
+	"""Auto-rebuilds index whenever files are added or updated, then caches it."""
+	index_file = "game_index.json"
+	rebuild = True
+
+	if os.path.exists(index_file):
+		try:
+			json_mtime = os.path.getmtime(index_file)
+			parts = data_sig.split("_")
+			newest_file_mtime = float(parts[1]) if len(parts) > 1 else 0
+			# If the JSON is newer than all raw files, we can safely reuse it
+			if json_mtime >= newest_file_mtime:
+				df = pd.read_json(index_file)
+				if not df.empty:
+					rebuild = False
+					return df
+		except Exception:
+			rebuild = True
+
+	if rebuild:
+		build_game_index()
+		if os.path.exists(index_file):
+			return pd.read_json(index_file)
+	return pd.DataFrame()
+
+# Automatically detects new seasons/games for all online users
+data_signature = get_data_signature()
+df_index = load_or_build_index(data_signature)
 
 # --- 1. GLOBAL SETUP ---
 # Slim version: Only the essential selectors
