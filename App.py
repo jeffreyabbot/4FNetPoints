@@ -2179,13 +2179,25 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 def get_data_signature():
-	"""Quickly checks total count of raw files and newest modification time (takes ~2ms)."""
+	"""Comprova la marca de sincronització i tots els fitxers de dades."""
 	total_files = 0
 	newest_mtime = 0.0
+	sync_stamp = "0"
+	
 	if not os.path.exists(DATA_BASE_PATH):
-		return "0_0"
+		return "0_0_0"
+
+	ts_file = os.path.join(DATA_BASE_PATH, "sync_timestamp.txt")
+	if os.path.exists(ts_file):
+		try:
+			with open(ts_file, "r", encoding="utf-8") as f:
+				sync_stamp = f.read().strip()
+		except OSError:
+			pass
+
 	for root, _, files in os.walk(DATA_BASE_PATH):
-		if os.path.basename(root).lower() == "raw":
+		folder = os.path.basename(root).lower()
+		if folder in ["raw", "aggregate", "individual", "aggregate_individual"]:
 			for f in files:
 				if f.endswith(".xlsx") and not f.startswith("~$"):
 					total_files += 1
@@ -2195,7 +2207,39 @@ def get_data_signature():
 							newest_mtime = mt
 					except OSError:
 						pass
-	return f"{total_files}_{newest_mtime}"
+
+	return f"{sync_stamp}_{total_files}_{newest_mtime}"
+
+def auto_sync_index_and_caches():
+	"""Detecta qualsevol dada nova i neteja les caches de Streamlit automàticament."""
+	sig_file = "data_sig.txt"
+	index_file = "game_index.json"
+	current_sig = get_data_signature()
+	
+	last_sig = ""
+	if os.path.exists(sig_file):
+		try:
+			with open(sig_file, "r", encoding="utf-8") as f:
+				last_sig = f.read().strip()
+		except Exception:
+			pass
+
+	if last_sig != current_sig or not os.path.exists(index_file):
+		st.cache_data.clear()
+		st.cache_resource.clear()
+		build_game_index()
+		try:
+			with open(sig_file, "w", encoding="utf-8") as f:
+				f.write(current_sig)
+		except Exception:
+			pass
+
+	if os.path.exists(index_file):
+		return pd.read_json(index_file)
+	return pd.DataFrame()
+
+# S'executa automàticament en mil·lisegons: si no hi ha canvis no fa res; si n'hi ha, refresca tot sol!
+df_index = auto_sync_index_and_caches()
 
 @st.cache_data
 def load_or_build_index(data_sig):
