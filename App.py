@@ -1692,32 +1692,42 @@ def build_game_index():
 					round_label = f"Playoffs G{seen_counts[m_key]}"
 					final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
 		else:
-				# --- THE FIXED ROUND LOGIC ---
+				# Carreguem el mapa oficial de jornades generat per les caches si existeix
+				rounds_map = {}
+				rounds_map_path = os.path.join(DATA_BASE_PATH, "rounds_mapping.json")
+				if os.path.exists(rounds_map_path):
+					try:
+						with open(rounds_map_path, "r", encoding="utf-8") as rf:
+							rounds_map = json.load(rf)
+					except Exception:
+						rounds_map = {}
+
 				unique_teams = set(df_group['t1']) | set(df_group['t2'])
 				n_teams = len(unique_teams)
 				id_block_size = (n_teams + 1) // 2 
 				base_id = df_group['game_id'].min()
 				
 				for _, row in df_group.iterrows():
-					# FIX: Check if we are in Euroleague
-					if lg == "Euroleague":
-						# Euroleague rounds are 1-38. 
-						# If your game IDs are strictly sequential, 
-						# we just need to ensure we don't cap at 34.
+					gid_str = str(row['game_id'])
+					
+					# 1. PRIORITAT ABSOLUTA: Si l'ID és al mapa oficial de la cache, fem servir la jornada real!
+					if gid_str in rounds_map:
+						round_label = rounds_map[gid_str]
+					# 2. FALLBACK: Fórmula matemàtica (per a ACB / Euroleague o partits antics)
+					elif lg == "Euroleague":
 						rnd_num = ((row['game_id'] - base_id) // id_block_size) + 1
-						# Remove the 'min(..., 34)' cap
-						display_rnd = int(rnd_num)
+						round_label = f"Round {int(rnd_num):02d}"
 					else:
-						# Keep existing FEB logic
 						rnd_num = ((row['game_id'] - base_id) // id_block_size) + 1
 						display_rnd = min(int(rnd_num), 34)
+						round_label = f"Round {display_rnd:02d}"
 					
-					round_label = f"Round {display_rnd:02d}"
 					final_data.append(extract_game_details(row, lg, sn, ph_orig, gp, round_label))
 
 	with open("game_index.json", "w") as f:
 		json.dump(final_data, f, indent=4)
 	print(f"--- [INDEXING COMPLETE] ---\n")
+
 def extract_game_details(row, lg, sn, ph_orig, gp, round_label):
 	"""Helper to read the actual scores from the file for the final index."""
 	try:
